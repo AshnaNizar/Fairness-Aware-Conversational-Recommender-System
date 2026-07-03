@@ -441,6 +441,8 @@ def main():
                 best_ndcg  = ndcg
                 best_epoch = epoch
                 torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, "best_model_kg.pt"))
+                torch.save({"edge_index": edge_index.cpu(), "n_total": n_total}, "outputs/kg/kg_graph.pt")
+
 
     print(f"\nBest NDCG@10 on val: {best_ndcg:.4f} at epoch {best_epoch}")
 
