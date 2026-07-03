@@ -1,6 +1,8 @@
 data/
 outputs/baseline/best_model.pt
 outputs/kg/best_model_kg.pt
+outputs/kg/candidate_pool.pkl
+outputs/kg/kg_graph.pt
 __pycache__/
 *.pyc
 tmdb_cache.csv
