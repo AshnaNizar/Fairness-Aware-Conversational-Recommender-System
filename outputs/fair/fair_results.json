@@ -1,0 +1,100 @@
+{
+  "primary_p": 0.3,
+  "fair_alpha": 0.1,
+  "comparison_table": {
+    "NDCG@10": {
+      "baseline": 0.0148,
+      "kg": 0.0133,
+      "kg_fair": 0.0101,
+      "delta_fair": -0.0031999999999999997
+    },
+    "Precision@10": {
+      "baseline": 0.0097,
+      "kg": 0.01,
+      "kg_fair": 0.0083,
+      "delta_fair": -0.0017000000000000001
+    },
+    "Recall@10": {
+      "baseline": 0.0273,
+      "kg": 0.0181,
+      "kg_fair": 0.0147,
+      "delta_fair": -0.003400000000000002
+    },
+    "Gender SPD": {
+      "baseline": -0.7482,
+      "kg": -0.8888,
+      "kg_fair": -0.2719,
+      "delta_fair": 0.6169
+    },
+    "Gender EOD": {
+      "baseline": -0.001,
+      "kg": -0.0001,
+      "kg_fair": 0.0538,
+      "delta_fair": 0.0539
+    },
+    "Region SPD": {
+      "baseline": -0.9992,
+      "kg": -0.9949,
+      "kg_fair": -0.3627,
+      "delta_fair": 0.6322
+    },
+    "Region EOD": {
+      "baseline": -0.0108,
+      "kg": -0.0102,
+      "kg_fair": 0.0744,
+      "delta_fair": 0.0846
+    }
+  },
+  "fut_curve": [
+    {
+      "p": 0.1,
+      "ndcg_at_10": 0.0121,
+      "precision_at_10": 0.0093,
+      "recall_at_10": 0.017,
+      "gender_spd": -0.7738,
+      "gender_eod": 0.0092,
+      "region_spd": -0.7712,
+      "region_eod": 0.0127
+    },
+    {
+      "p": 0.2,
+      "ndcg_at_10": 0.0116,
+      "precision_at_10": 0.009,
+      "recall_at_10": 0.0164,
+      "gender_spd": -0.5388,
+      "gender_eod": 0.0305,
+      "region_spd": -0.5641,
+      "region_eod": 0.0546
+    },
+    {
+      "p": 0.3,
+      "ndcg_at_10": 0.0101,
+      "precision_at_10": 0.0083,
+      "recall_at_10": 0.0147,
+      "gender_spd": -0.2719,
+      "gender_eod": 0.0538,
+      "region_spd": -0.3627,
+      "region_eod": 0.0744
+    },
+    {
+      "p": 0.4,
+      "ndcg_at_10": 0.0081,
+      "precision_at_10": 0.0067,
+      "recall_at_10": 0.0103,
+      "gender_spd": -0.1806,
+      "gender_eod": 0.0556,
+      "region_spd": -0.1649,
+      "region_eod": 0.0874
+    },
+    {
+      "p": 0.5,
+      "ndcg_at_10": 0.0058,
+      "precision_at_10": 0.0048,
+      "recall_at_10": 0.0053,
+      "gender_spd": -0.0838,
+      "gender_eod": 0.0574,
+      "region_spd": 0.0304,
+      "region_eod": 0.0932
+    }
+  ]
+}
