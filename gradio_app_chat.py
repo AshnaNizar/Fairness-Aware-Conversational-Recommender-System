@@ -1,23 +1,31 @@
 """
-FA-CRS Gradio Demo — with Ollama conversational layer
+FA-CRS Gradio Demo — Redesigned UI
 ------------------------------------------------------
+Dark mode · Glassmorphism · Chat-first layout · Persona-based user selection
+Metric visualisations · Recommendation tables as comparison panel
+
 Run from the project root after heterogeneous_kg.py has been run:
 
-    pip install gradio requests
-    ollama pull llama3          # or whichever model you prefer
-    python gradio_app.py
+    pip install gradio requests matplotlib
+    ollama pull llama3
+    python gradio_app_chat.py
 
 Fairness target p is fixed at 0.3 (the elbow of the FUT curve).
 Ollama must be running locally: ollama serve
 """
 
-import os, math, json, re
+import os, math, json, re, io, base64
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import requests
 import gradio as gr
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.colors import to_rgba
 from torch_geometric.nn import LightGCN
 from tqdm import tqdm
 
@@ -30,14 +38,284 @@ NUM_LAYERS      = 3
 MIN_RATING      = 4
 TOP_K           = 10
 CANDIDATE_K     = 50
-P_FAIRNESS      = 0.3          # fixed — elbow of FUT curve
+P_FAIRNESS      = 0.3
 OLLAMA_URL      = "http://localhost:11434/api/chat"
-OLLAMA_MODEL    = "llama3"     # change to llama3.2, mistral, etc. if preferred
+OLLAMA_MODEL    = "llama3"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# ─── PERSONAS ─────────────────────────────────────────────────────────────────
+# Each persona maps to a genre preference used to pick a representative user.
 
-# ─── DATA / GRAPH / MODEL (same as before) ────────────────────────────────────
+PERSONAS = {
+    "🎬 Action Fan":        {"genres": ["Action", "Thriller"], "desc": "Loves high-octane action and edge-of-seat thrillers"},
+    "🎭 Drama Lover":       {"genres": ["Drama", "Romance"],   "desc": "Prefers deep narratives and emotional storytelling"},
+    "😂 Comedy Enthusiast": {"genres": ["Comedy"],             "desc": "Here for laughs — sitcoms, stand-up, and rom-coms"},
+    "👽 Sci-Fi Explorer":   {"genres": ["Sci-Fi", "Fantasy"],  "desc": "Drawn to speculative worlds and imaginative futures"},
+    "🔪 Horror Buff":       {"genres": ["Horror"],             "desc": "Seeks tension, scares, and the macabre"},
+    "🕵️ Mystery Aficionado":{"genres": ["Mystery", "Crime"],   "desc": "Enjoys whodunits and investigative narratives"},
+    "🎞️ Indie/Art House":   {"genres": ["Documentary", "Animation"], "desc": "Appreciates auteur cinema and non-mainstream picks"},
+}
+
+# ─── CUSTOM CSS ───────────────────────────────────────────────────────────────
+
+DARK_CSS = """
+/* ── Global Reset ─────────────────────────────────────────── */
+:root {
+    --bg-primary:   #0d0f14;
+    --bg-secondary: #13161e;
+    --glass-bg:     rgba(255,255,255,0.045);
+    --glass-border: rgba(255,255,255,0.08);
+    --glass-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    --accent-1:     #7c3aed;
+    --accent-2:     #3b82f6;
+    --accent-grad:  linear-gradient(135deg, #7c3aed 0%, #3b82f6 100%);
+    --text-primary: #f1f5f9;
+    --text-muted:   #94a3b8;
+    --success:      #22c55e;
+    --warning:      #f59e0b;
+    --radius:       14px;
+    --radius-sm:    8px;
+}
+
+body, .gradio-container {
+    background: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif !important;
+}
+
+/* ── Gradient Header ───────────────────────────────────────── */
+#header-block {
+    background: linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(59,130,246,0.12) 100%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 28px 32px 20px;
+    margin-bottom: 20px;
+    backdrop-filter: blur(12px);
+    box-shadow: var(--glass-shadow);
+}
+
+#header-block h1 {
+    background: var(--accent-grad);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 2rem !important;
+    font-weight: 800 !important;
+    margin-bottom: 6px !important;
+}
+
+#header-block p {
+    color: var(--text-muted) !important;
+    font-size: 0.95rem !important;
+}
+
+/* ── Glassmorphism Panels ──────────────────────────────────── */
+.glass-panel {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius) !important;
+    backdrop-filter: blur(16px) !important;
+    box-shadow: var(--glass-shadow) !important;
+    padding: 20px !important;
+}
+
+/* ── Section Labels ────────────────────────────────────────── */
+.section-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+/* ── Persona Cards ─────────────────────────────────────────── */
+#persona-row .gr-button {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius-sm) !important;
+    color: var(--text-primary) !important;
+    font-size: 0.82rem !important;
+    padding: 10px 8px !important;
+    transition: all 0.2s ease !important;
+    cursor: pointer;
+    width: 100% !important;
+    text-align: left !important;
+}
+
+#persona-row .gr-button:hover {
+    background: rgba(124,58,237,0.18) !important;
+    border-color: var(--accent-1) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(124,58,237,0.2) !important;
+}
+
+#persona-row .gr-button.selected {
+    background: linear-gradient(135deg, rgba(124,58,237,0.25), rgba(59,130,246,0.2)) !important;
+    border-color: var(--accent-1) !important;
+}
+
+/* ── Chat Window ───────────────────────────────────────────── */
+#chatbot-panel {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius) !important;
+}
+
+#chatbot-panel .message.user {
+    background: linear-gradient(135deg, rgba(124,58,237,0.35), rgba(59,130,246,0.25)) !important;
+    border-radius: 18px 18px 4px 18px !important;
+    color: #fff !important;
+}
+
+#chatbot-panel .message.bot {
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 18px 18px 18px 4px !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Chat Input ────────────────────────────────────────────── */
+#chat-input-row textarea {
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px !important;
+    color: var(--text-primary) !important;
+    caret-color: var(--accent-1) !important;
+    font-size: 0.95rem !important;
+    padding: 12px 16px !important;
+}
+
+#chat-input-row textarea:focus {
+    border-color: var(--accent-1) !important;
+    box-shadow: 0 0 0 2px rgba(124,58,237,0.2) !important;
+    outline: none !important;
+}
+
+#send-btn {
+    background: var(--accent-grad) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    padding: 0 24px !important;
+    font-size: 0.9rem !important;
+    transition: opacity 0.2s !important;
+}
+
+#send-btn:hover { opacity: 0.88 !important; }
+
+/* ── Suggestion Chips ──────────────────────────────────────── */
+#suggestion-row .gr-button {
+    background: rgba(124,58,237,0.12) !important;
+    border: 1px solid rgba(124,58,237,0.3) !important;
+    border-radius: 20px !important;
+    color: #a78bfa !important;
+    font-size: 0.8rem !important;
+    padding: 6px 14px !important;
+    white-space: nowrap;
+    transition: all 0.2s !important;
+}
+
+#suggestion-row .gr-button:hover {
+    background: rgba(124,58,237,0.25) !important;
+    color: #fff !important;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────── */
+.gr-tabs > .tab-nav {
+    background: var(--glass-bg) !important;
+    border-bottom: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius) var(--radius) 0 0 !important;
+    padding: 0 16px !important;
+}
+
+.gr-tabs > .tab-nav button {
+    color: var(--text-muted) !important;
+    border: none !important;
+    font-weight: 500 !important;
+    padding: 12px 20px !important;
+    background: transparent !important;
+    border-bottom: 2px solid transparent !important;
+    transition: all 0.2s !important;
+}
+
+.gr-tabs > .tab-nav button.selected {
+    color: var(--text-primary) !important;
+    border-bottom-color: var(--accent-1) !important;
+}
+
+/* ── Dataframes ────────────────────────────────────────────── */
+.gr-dataframe table {
+    background: transparent !important;
+    color: var(--text-primary) !important;
+    font-size: 0.82rem !important;
+}
+
+.gr-dataframe th {
+    background: rgba(255,255,255,0.05) !important;
+    color: var(--text-muted) !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.04em !important;
+    border-bottom: 1px solid var(--glass-border) !important;
+}
+
+.gr-dataframe tr:hover td {
+    background: rgba(124,58,237,0.08) !important;
+}
+
+.gr-dataframe td {
+    border-color: var(--glass-border) !important;
+}
+
+/* ── User info badge ───────────────────────────────────────── */
+#user-badge {
+    background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.15));
+    border: 1px solid rgba(124,58,237,0.3);
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.88rem;
+    color: #c4b5fd;
+}
+
+/* ── Divider ───────────────────────────────────────────────── */
+.divider {
+    border: none;
+    border-top: 1px solid var(--glass-border);
+    margin: 24px 0;
+}
+
+/* ── Accordion (bottom panels) ─────────────────────────────── */
+.gr-accordion {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: var(--radius) !important;
+    margin-bottom: 12px !important;
+}
+
+.gr-accordion .label-wrap {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+    padding: 14px 18px !important;
+    background: transparent !important;
+}
+
+/* ── Metrics image ─────────────────────────────────────────── */
+#metrics-img img {
+    border-radius: var(--radius) !important;
+    max-width: 100% !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+"""
+
+
+# ─── DATA / GRAPH / MODEL ─────────────────────────────────────────────────────
 
 def load_data():
     ratings = pd.read_csv(os.path.join(DATA_DIR, "ratings.csv"))
@@ -173,25 +451,18 @@ def fair_rerank(candidates, movie_attr, protected_val, p, k=TOP_K):
 
 def rerank_user(cands, excluded_genres=None, include_genres=None):
     filtered = cands
-
-    # Genre inclusion: keep only movies that match at least one requested genre.
-    # Operates on the full candidate pool so every scored unseen movie is eligible,
-    # not just the default top-50. FA*IR still runs on whatever subset remains.
     if include_genres:
         include_lower = [g.lower() for g in include_genres]
         filtered = [(m, s) for m, s in cands
                     if m in movies_indexed.index and
                     any(ig in movies_indexed.loc[m, "genres"].lower()
                         for ig in include_lower)]
-
-    # Genre exclusion (can combine with inclusion).
     if excluded_genres:
         excluded_lower = [g.lower() for g in excluded_genres]
         filtered = [(m, s) for m, s in filtered
                     if not any(eg in movies_indexed.loc[m, "genres"].lower()
                                for eg in excluded_lower
                                if m in movies_indexed.index)]
-
     reranked_gender, gender_flags = fair_rerank(filtered, movie_gender, "female", P_FAIRNESS)
     reranked_scores = {m: s for m, s in filtered}
     reranked_cands  = [(m, reranked_scores.get(m, -np.inf)) for m in reranked_gender]
@@ -273,7 +544,6 @@ def call_ollama(messages):
 
 
 def parse_intent(raw):
-    """Parse Ollama's JSON response, fallback gracefully."""
     try:
         clean = re.sub(r"```json|```", "", raw).strip()
         return json.loads(clean)
@@ -282,7 +552,6 @@ def parse_intent(raw):
 
 
 def build_watch_history_summary(user_idx):
-    """Summarise what this user has already watched (for context to Ollama)."""
     seen = train_seen.get(user_idx, set())
     if not seen:
         return "no recorded watch history"
@@ -294,7 +563,6 @@ def build_watch_history_summary(user_idx):
 
 
 def generate_explanation(movie_idx, flag, user_question):
-    """Ask Ollama to explain why a specific movie was recommended."""
     if movie_idx not in movies_indexed.index:
         return "I don't have details on that film."
     row = movies_indexed.loc[movie_idx]
@@ -371,6 +639,28 @@ try:
 
     print("Building candidate pools...")
     ALL_CANDIDATES = {u: build_candidates(u) for u in tqdm(range(n_users))}
+
+    # Build per-genre user index for persona selection
+    # For each genre, find users whose training set contains the most of that genre
+    genre_user_map = {}
+    for u, seen_set in train_seen.items():
+        for m in seen_set:
+            if m in movies_indexed.index:
+                for g in str(movies_indexed.loc[m, "genres"]).split("|"):
+                    g = g.strip()
+                    genre_user_map.setdefault(g, {})
+                    genre_user_map[g][u] = genre_user_map[g].get(u, 0) + 1
+
+    def persona_to_user(genres):
+        """Return the user index with the most watches across the given genres."""
+        counts = {}
+        for g in genres:
+            for u, c in genre_user_map.get(g, {}).items():
+                counts[u] = counts.get(u, 0) + c
+        if not counts:
+            return 0
+        return max(counts, key=counts.get)
+
     print(f"Ready. {n_users} users, {n_movies} movies. Ollama: {'available' if ollama_available() else 'not running'}")
     READY = True
 
@@ -387,6 +677,13 @@ FLAG_LABELS = {
     "region":    "Region diversity pick",
 }
 
+FLAG_EMOJI = {
+    "relevance": "⭐",
+    "gender":    "♀️",
+    "region":    "🌍",
+}
+
+
 def rec_table(rec_list, flags):
     rows = []
     for rank, (m, flag) in enumerate(zip(rec_list, flags), 1):
@@ -399,18 +696,17 @@ def rec_table(rec_list, flags):
             region   = row.get("region", "unknown")
         else:
             title, genres, director, gender, region = f"Movie {m}", "", "Unknown", "unknown", "unknown"
+        emoji = FLAG_EMOJI.get(flag, "")
         rows.append({
-            "#": rank, "Title": title, "Genre": genres,
-            "Director": director, "Dir. gender": gender,
-            "Region": region, "Why": FLAG_LABELS.get(flag, flag),
+            "#": rank, "Title": title, "Genres": genres,
+            "Director": director, "Gender": gender,
+            "Region": region, "Reason": f"{emoji} {FLAG_LABELS.get(flag, flag)}",
         })
     return pd.DataFrame(rows)
 
 
 def get_recommendations(user_id, excluded_genres=None, include_genres=None):
     user_id = int(user_id)
-    # Use the FULL candidate pool (all scored unseen movies) so genre filters
-    # have the widest possible pool to draw from before FA*IR runs.
     cands = ALL_CANDIDATES.get(user_id, [])
     baseline_list  = [m for m, s in cands[:TOP_K]]
     fair_list, fair_flags = rerank_user(cands, excluded_genres, include_genres)
@@ -419,26 +715,195 @@ def get_recommendations(user_id, excluded_genres=None, include_genres=None):
             fair_list, fair_flags)
 
 
+# ─── METRICS CHART ───────────────────────────────────────────────────────────
+
+def make_metrics_chart(baseline_list, fair_list, fair_flags):
+    """Return a matplotlib figure comparing baseline vs FA*IR across fairness metrics."""
+    plt.style.use("dark_background")
+
+    # Compute stats
+    def compute_stats(rec_list, flags=None):
+        n = len(rec_list)
+        if n == 0:
+            return {"female_pct": 0, "nonwest_pct": 0, "relevance_pct": 0, "gender_pct": 0, "region_pct": 0}
+        female   = sum(1 for m in rec_list if movie_gender.get(m) == "female")
+        nonwest  = sum(1 for m in rec_list if movie_region.get(m) == "non-western")
+        stats = {"female_pct": female / n * 100, "nonwest_pct": nonwest / n * 100}
+        if flags:
+            stats["relevance_pct"] = sum(1 for f in flags if f == "relevance") / n * 100
+            stats["gender_pct"]    = sum(1 for f in flags if f == "gender")    / n * 100
+            stats["region_pct"]    = sum(1 for f in flags if f == "region")    / n * 100
+        return stats
+
+    b_stats = compute_stats(baseline_list)
+    f_stats = compute_stats(fair_list, fair_flags)
+
+    # Colour palette
+    COL_BASE  = "#3b82f6"
+    COL_FAIR  = "#7c3aed"
+    COL_FEM   = "#ec4899"
+    COL_WEST  = "#f59e0b"
+    BG        = "#13161e"
+    PANEL_BG  = "#1a1d26"
+
+    fig = plt.figure(figsize=(14, 8), facecolor=BG)
+    fig.patch.set_facecolor(BG)
+
+    gs = fig.add_gridspec(2, 3, hspace=0.45, wspace=0.35,
+                          left=0.07, right=0.97, top=0.88, bottom=0.1)
+
+    ax_bar   = fig.add_subplot(gs[0, :2])   # bar chart spanning 2 cols
+    ax_pie_g = fig.add_subplot(gs[0, 2])    # gender pie
+    ax_pie_r = fig.add_subplot(gs[1, 0])    # region pie
+    ax_flags = fig.add_subplot(gs[1, 1])    # flag breakdown
+    ax_spd   = fig.add_subplot(gs[1, 2])    # SPD gauge
+
+    for ax in [ax_bar, ax_pie_g, ax_pie_r, ax_flags, ax_spd]:
+        ax.set_facecolor(PANEL_BG)
+        for spine in ax.spines.values():
+            spine.set_edgecolor("#2d3148")
+
+    # ── Bar Chart: Diversity % comparison ─────────────────────────────────────
+    metrics  = ["% Female\nDirector", "% Non-Western\nProduction"]
+    baseline = [b_stats["female_pct"], b_stats["nonwest_pct"]]
+    fair     = [f_stats["female_pct"], f_stats["nonwest_pct"]]
+    x = np.arange(len(metrics))
+    w = 0.32
+    bars_b = ax_bar.bar(x - w/2, baseline, w, label="Baseline (relevance only)",
+                        color=COL_BASE, alpha=0.85, zorder=3)
+    bars_f = ax_bar.bar(x + w/2, fair,     w, label="FA★IR reranked",
+                        color=COL_FAIR, alpha=0.85, zorder=3)
+    ax_bar.axhline(P_FAIRNESS * 100, color="#22c55e", linewidth=1.2, linestyle="--",
+                   alpha=0.7, label=f"Target p={P_FAIRNESS}")
+    for bar in bars_b:
+        ax_bar.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.8,
+                    f"{bar.get_height():.0f}%", ha="center", va="bottom",
+                    color="#94a3b8", fontsize=9)
+    for bar in bars_f:
+        ax_bar.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.8,
+                    f"{bar.get_height():.0f}%", ha="center", va="bottom",
+                    color="#c4b5fd", fontsize=9, fontweight="bold")
+    ax_bar.set_xticks(x); ax_bar.set_xticklabels(metrics, color="#94a3b8", fontsize=10)
+    ax_bar.set_ylabel("% of top-10 list", color="#94a3b8", fontsize=9)
+    ax_bar.set_title("Fairness Dimension Comparison", color="#f1f5f9", fontsize=11, fontweight="bold", pad=10)
+    ax_bar.legend(loc="upper right", fontsize=8, framealpha=0.15, labelcolor="#94a3b8")
+    ax_bar.set_ylim(0, max(max(baseline + fair), P_FAIRNESS * 100) + 15)
+    ax_bar.yaxis.grid(True, alpha=0.12, zorder=0); ax_bar.set_axisbelow(True)
+    ax_bar.tick_params(colors="#4a5568")
+
+    # ── Pie: Gender breakdown (FA*IR list) ────────────────────────────────────
+    gender_counts = {"Female": 0, "Male": 0, "Unknown": 0}
+    for m in fair_list:
+        g = movie_gender.get(m, "unknown")
+        if g == "female":    gender_counts["Female"]  += 1
+        elif g == "male":    gender_counts["Male"]    += 1
+        else:                gender_counts["Unknown"] += 1
+    labels_g = [k for k, v in gender_counts.items() if v > 0]
+    sizes_g  = [v for v in gender_counts.values()    if v > 0]
+    colors_g = {"Female": COL_FEM, "Male": COL_BASE, "Unknown": "#4a5568"}
+    pie_colors_g = [colors_g[l] for l in labels_g]
+    wedges, texts, autotexts = ax_pie_g.pie(
+        sizes_g, labels=None, colors=pie_colors_g, autopct="%1.0f%%",
+        startangle=90, pctdistance=0.75,
+        wedgeprops=dict(linewidth=1.5, edgecolor=PANEL_BG))
+    for at in autotexts: at.set_color("#f1f5f9"); at.set_fontsize(9)
+    ax_pie_g.set_title("Director Gender\n(FA★IR list)", color="#f1f5f9", fontsize=10, fontweight="bold")
+    ax_pie_g.legend(labels_g, loc="lower center", fontsize=8, framealpha=0.0,
+                    labelcolor="#94a3b8", ncol=len(labels_g), bbox_to_anchor=(0.5, -0.18))
+
+    # ── Pie: Region breakdown (FA*IR list) ────────────────────────────────────
+    region_counts = {"Non-western": 0, "Western": 0, "Unknown": 0}
+    for m in fair_list:
+        r = movie_region.get(m, "unknown")
+        if r == "non-western": region_counts["Non-western"] += 1
+        elif r == "western":   region_counts["Western"]     += 1
+        else:                  region_counts["Unknown"]     += 1
+    labels_r = [k for k, v in region_counts.items() if v > 0]
+    sizes_r  = [v for v in region_counts.values()    if v > 0]
+    colors_r = {"Non-western": COL_WEST, "Western": COL_BASE, "Unknown": "#4a5568"}
+    pie_colors_r = [colors_r[l] for l in labels_r]
+    wedges2, texts2, autotexts2 = ax_pie_r.pie(
+        sizes_r, labels=None, colors=pie_colors_r, autopct="%1.0f%%",
+        startangle=90, pctdistance=0.75,
+        wedgeprops=dict(linewidth=1.5, edgecolor=PANEL_BG))
+    for at in autotexts2: at.set_color("#f1f5f9"); at.set_fontsize(9)
+    ax_pie_r.set_title("Production Region\n(FA★IR list)", color="#f1f5f9", fontsize=10, fontweight="bold")
+    ax_pie_r.legend(labels_r, loc="lower center", fontsize=8, framealpha=0.0,
+                    labelcolor="#94a3b8", ncol=len(labels_r), bbox_to_anchor=(0.5, -0.18))
+
+    # ── Stacked bar: flag breakdown ────────────────────────────────────────────
+    if fair_flags:
+        rel_n   = fair_flags.count("relevance")
+        gen_n   = fair_flags.count("gender")
+        reg_n   = fair_flags.count("region")
+        total   = len(fair_flags)
+        heights = [rel_n, gen_n, reg_n]
+        colors_f= ["#3b82f6", "#ec4899", "#f59e0b"]
+        bottom  = 0
+        for h, c, lbl in zip(heights, colors_f, ["Relevance", "Gender boost", "Region boost"]):
+            if h > 0:
+                ax_flags.bar(0, h, bottom=bottom, color=c, width=0.5, label=lbl)
+                if h > 0.3:
+                    ax_flags.text(0, bottom + h/2, f"{h}", ha="center", va="center",
+                                  color="white", fontsize=11, fontweight="bold")
+                bottom += h
+        ax_flags.set_xlim(-0.6, 0.6)
+        ax_flags.set_ylim(0, total + 1)
+        ax_flags.set_xticks([])
+        ax_flags.set_yticks(range(0, total + 1, 2))
+        ax_flags.tick_params(colors="#4a5568")
+        ax_flags.set_title("Slot Allocation\n(FA★IR list)", color="#f1f5f9", fontsize=10, fontweight="bold")
+        ax_flags.legend(fontsize=8, framealpha=0.0, labelcolor="#94a3b8",
+                        loc="lower right", bbox_to_anchor=(1.5, 0))
+        ax_flags.yaxis.grid(True, alpha=0.12); ax_flags.set_axisbelow(True)
+        ax_flags.set_ylabel("# slots", color="#94a3b8", fontsize=9)
+
+    # ── SPD indicator ─────────────────────────────────────────────────────────
+    # Estimate SPD from the top-10: mean score of protected vs unprotected
+    # (simplified proxy — full SPD needs held-out labels)
+    prot_g  = [m for m in fair_list if movie_gender.get(m) == "female"]
+    unprot_g = [m for m in fair_list if movie_gender.get(m) != "female"]
+    raw_female_pct = len(prot_g) / len(fair_list) * 100 if fair_list else 0
+    # Show a simple "before / after" SPD proxy as a horizontal gauge
+    spd_before = -0.82   # from paper
+    spd_after  = -0.26   # from paper (68% reduction)
+    gauge_vals  = [abs(spd_before), abs(spd_after)]
+    gauge_cols  = [COL_BASE, COL_FAIR]
+    gauge_lbls  = ["Baseline\nSPD", "FA★IR\nSPD"]
+    bars_spd = ax_spd.barh(gauge_lbls, gauge_vals, color=gauge_cols, alpha=0.85, height=0.4)
+    for bar, val in zip(bars_spd, [spd_before, spd_after]):
+        ax_spd.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height()/2,
+                    f"{val:.2f}", va="center", color="#94a3b8", fontsize=10)
+    ax_spd.set_xlim(0, 1.1)
+    ax_spd.set_xlabel("│SPD│ (lower = fairer)", color="#94a3b8", fontsize=8)
+    ax_spd.set_title("Gender SPD\n(paper results)", color="#f1f5f9", fontsize=10, fontweight="bold")
+    ax_spd.tick_params(colors="#94a3b8")
+    ax_spd.xaxis.grid(True, alpha=0.12); ax_spd.set_axisbelow(True)
+
+    # Super-title
+    fig.suptitle("FA★IR Fairness Metrics Dashboard",
+                 color="#f1f5f9", fontsize=14, fontweight="bold", y=0.96)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, facecolor=BG, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 # ─── CONVERSATIONAL HANDLER ──────────────────────────────────────────────────
 
 def chat(user_message, history, user_id, current_fair_list, current_fair_flags, excluded_genres_state, include_genres_state):
-    """
-    Main chat callback. Returns updated history + possibly updated rec tables.
-
-    include_genres_state: set when user asks for a specific genre ("show me thrillers").
-                          Filters the KG candidate pool to that genre before FA*IR runs,
-                          so results are both personalised and fairness-reranked.
-    excluded_genres_state: genres permanently hidden from all results.
-    """
     user_id = int(user_id)
 
     if not ollama_available():
         reply = ("Ollama isn't running. Start it with `ollama serve` in a terminal, "
                  "then refresh the page. In the meantime you can still browse the recommendation tables.")
         history = history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}]
-        return history, *get_recommendations(user_id, excluded_genres_state, include_genres_state)[:2], excluded_genres_state, include_genres_state
+        bt, ft, fl, ff = get_recommendations(user_id, excluded_genres_state, include_genres_state)
+        chart = make_metrics_chart(fl, fl, ff)
+        return history, bt, ft, excluded_genres_state, include_genres_state, fl, ff, chart
 
-    # Build context about current recommendations for Ollama
     context_lines = ["Current FA*IR recommendations for this user:"]
     if include_genres_state:
         context_lines.append(f"  (currently filtered to genres: {', '.join(include_genres_state)})")
@@ -464,38 +929,32 @@ def chat(user_message, history, user_id, current_fair_list, current_fair_flags, 
     intent = parsed.get("intent", "question")
 
     if intent == "recommend":
-        # The user wants movies of a specific genre.
-        # 1. Filter the full KG candidate pool to that genre (personalised scores).
-        # 2. Run FA*IR reranking at p=0.3 on the filtered subset (fairness enforced).
-        # The table now shows genre-specific results that are BOTH personalised
-        # (ranked by the KG model's dot-product score for this user) AND fair
-        # (at least p=0.3 female-directed and p=0.3 non-western within that genre).
         new_include = parsed.get("include_genres", [])
         reason      = parsed.get("reason", f"Showing {', '.join(new_include)} films with FA*IR fairness applied.")
-        _, fair_table, new_fair_list, new_fair_flags = get_recommendations(
-            user_id, excluded_genres_state, new_include)
+        _, fair_table, new_fair_list, new_fair_flags = get_recommendations(user_id, excluded_genres_state, new_include)
         baseline_table, _, _, _ = get_recommendations(user_id)
         n_found = len(new_fair_list)
         if n_found == 0:
             reply = (f"I couldn't find any {', '.join(new_include)} films in your unrated candidate pool. "
                      "Try a different genre or say 'reset filters' to start over.")
-            new_include = include_genres_state  # keep existing state unchanged
+            new_include = include_genres_state
         else:
             reply = f"{reason} ({n_found} result{'s' if n_found != 1 else ''} found, fairness reranked at p={P_FAIRNESS}). Say 'show all genres' to clear."
         history = history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}]
-        return history, baseline_table, fair_table, excluded_genres_state, new_include
+        chart = make_metrics_chart([m for m in new_fair_list], new_fair_list, new_fair_flags)
+        return history, baseline_table, fair_table, excluded_genres_state, new_include, new_fair_list, new_fair_flags, chart
 
     elif intent == "filter":
         new_excluded = excluded_genres_state + parsed.get("exclude_genres", [])
         new_excluded = list(set(new_excluded))
-        _, fair_table, new_fair_list, new_fair_flags = get_recommendations(
-            user_id, new_excluded, include_genres_state)
+        _, fair_table, new_fair_list, new_fair_flags = get_recommendations(user_id, new_excluded, include_genres_state)
         baseline_table, _, _, _ = get_recommendations(user_id)
         reason = parsed.get("reason", "Filtering applied.")
         excluded_str = ", ".join(new_excluded) if new_excluded else "none"
         reply = f"{reason} Currently excluding: {excluded_str}. Say 'reset filters' to clear."
         history = history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}]
-        return history, baseline_table, fair_table, new_excluded, include_genres_state
+        chart = make_metrics_chart([m for m in new_fair_list], new_fair_list, new_fair_flags)
+        return history, baseline_table, fair_table, new_excluded, include_genres_state, new_fair_list, new_fair_flags, chart
 
     elif intent == "explain":
         title_query = parsed.get("movie_title", "").lower()
@@ -513,8 +972,9 @@ def chat(user_message, history, user_id, current_fair_list, current_fair_flags, 
             flag = current_fair_flags[pos_in_list] if pos_in_list < len(current_fair_flags) else "relevance"
             reply = generate_explanation(matched_idx, flag, user_message)
         history = history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": reply}]
-        baseline_table, fair_table = get_recommendations(user_id, excluded_genres_state, include_genres_state)[:2]
-        return history, baseline_table, fair_table, excluded_genres_state, include_genres_state
+        baseline_table, fair_table, fl2, ff2 = get_recommendations(user_id, excluded_genres_state, include_genres_state)
+        chart = make_metrics_chart(fl2, fl2, ff2)
+        return history, baseline_table, fair_table, excluded_genres_state, include_genres_state, fl2, ff2, chart
 
     else:
         answer = parsed.get("answer", raw)
@@ -524,90 +984,159 @@ def chat(user_message, history, user_id, current_fair_list, current_fair_flags, 
             excluded_genres_state = []
             include_genres_state  = []
         history = history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": answer}]
-        baseline_table, fair_table = get_recommendations(user_id, excluded_genres_state, include_genres_state)[:2]
-        return history, baseline_table, fair_table, excluded_genres_state, include_genres_state
+        baseline_table, fair_table, fl2, ff2 = get_recommendations(user_id, excluded_genres_state, include_genres_state)
+        chart = make_metrics_chart(fl2, fl2, ff2)
+        return history, baseline_table, fair_table, excluded_genres_state, include_genres_state, fl2, ff2, chart
 
 
-# ─── UI ──────────────────────────────────────────────────────────────────────
+# ─── PERSONA SELECTION HELPERS ────────────────────────────────────────────────
 
-def on_user_change(user_id):
-    # Switching user resets genre filters — each user's candidate pool is different.
-    baseline_table, fair_table, fair_list, fair_flags = get_recommendations(int(user_id))
-    return baseline_table, fair_table, fair_list, fair_flags, [], []
+def select_persona(persona_name):
+    """Return (user_id, badge_html, history, bt, ft, fl, ff, chart)."""
+    if not READY:
+        return 0, "<div id='user-badge'>No data loaded.</div>", [], pd.DataFrame(), pd.DataFrame(), [], [], None
+    p = PERSONAS[persona_name]
+    user_id = persona_to_user(p["genres"])
+    bt, ft, fl, ff = get_recommendations(user_id)
+    badge = (f"<div id='user-badge'>👤 <b>{persona_name}</b> &nbsp;·&nbsp; "
+             f"User #{user_id} &nbsp;·&nbsp; {p['desc']}</div>")
+    welcome = [{"role": "assistant",
+                "content": f"I've loaded a profile for a **{persona_name}** (user #{user_id}). "
+                           f"This viewer loves {', '.join(p['genres'])} films. "
+                           f"Ask me to recommend something, filter genres, or explain why a film appeared!"}]
+    chart = make_metrics_chart(fl, fl, ff)
+    return user_id, badge, welcome, bt, ft, fl, ff, chart
 
+
+def send_suggestion(msg, history, user_id, fair_list, fair_flags, excl, incl):
+    return chat(msg, history, user_id, fair_list, fair_flags, excl, incl)
+
+
+# ─── UI BUILD ─────────────────────────────────────────────────────────────────
 
 def build_ui():
-    with gr.Blocks(title="FA-CRS Live Demo") as demo:
-        gr.Markdown("# FA-CRS — fairness-aware movie recommender")
-        gr.Markdown(
-            f"Fairness target fixed at **p = {P_FAIRNESS}** "
-            "(elbow of the FUT curve — best fairness gain per accuracy cost). "
-            "Use the chat to ask questions, filter genres, or explain any recommendation."
+    with gr.Blocks(title="FA-CRS · Fairness-Aware Movie Recommender") as demo:
+
+        # ── State ─────────────────────────────────────────────────────────────
+        user_id_state    = gr.State(0)
+        fair_list_state  = gr.State([])
+        fair_flags_state = gr.State([])
+        excluded_state   = gr.State([])
+        include_state    = gr.State([])
+
+        # ── Header ────────────────────────────────────────────────────────────
+        with gr.Group(elem_id="header-block"):
+            gr.Markdown(
+                "# FA-CRS — Fairness-Aware Movie Recommender\n"
+                f"Fairness target fixed at **p = {P_FAIRNESS}** (elbow of the FUT curve). "
+                "Choose a viewer persona below, then chat to get personalised, fairness-reranked recommendations."
+            )
+
+        # ── Persona Selection ─────────────────────────────────────────────────
+        gr.Markdown('<div class="section-label">① Choose a viewer persona</div>')
+        user_badge = gr.HTML("<div id='user-badge'>No persona selected yet — pick one above to begin.</div>")
+
+        with gr.Row(elem_id="persona-row"):
+            persona_btns = []
+            for pname in PERSONAS:
+                btn = gr.Button(pname, size="sm")
+                persona_btns.append((pname, btn))
+
+        gr.HTML('<hr class="divider">')
+
+        # ── Chat Section (MAIN) ───────────────────────────────────────────────
+        gr.Markdown('<div class="section-label">② Chat with your recommender</div>')
+
+        chatbot = gr.Chatbot(
+            height=420, type="messages",
+            elem_id="chatbot-panel",
+            show_copy_button=True,
+            avatar_images=(None, "https://api.dicebear.com/7.x/bottts-neutral/svg?seed=facrs"),
+            bubble_full_width=False,
         )
 
-        user_input = gr.Slider(0, max(n_users - 1, 1), value=0, step=1,
-                               label=f"User ID (0–{max(n_users - 1, 0)})")
+        # Suggestion chips
+        SUGGESTIONS = [
+            "🎬 Recommend me 10 films",
+            "🌍 Show non-western picks",
+            "♀️ Films by female directors",
+            "❓ How does FA★IR work?",
+            "🔍 Explain the first recommendation",
+            "🚫 No more action movies",
+            "🔄 Reset all filters",
+        ]
+        with gr.Row(elem_id="suggestion-row"):
+            sug_btns = [gr.Button(s, size="sm") for s in SUGGESTIONS]
 
-        with gr.Row():
-            baseline_out = gr.Dataframe(label="Relevance only")
-            fair_out     = gr.Dataframe(label=f"FA*IR reranked (p={P_FAIRNESS})")
+        with gr.Row(elem_id="chat-input-row"):
+            chat_input = gr.Textbox(
+                placeholder="Ask for a genre, explain a pick, or filter results...",
+                show_label=False, scale=6, lines=1,
+            )
+            send_btn = gr.Button("Send ↗", variant="primary", scale=1, elem_id="send-btn")
 
-        gr.Markdown("### Chat with the recommender")
-        gr.Markdown(
-            "Try: *'Give me 10 thriller movies'* · "
-            "*'Why is the first film recommended?'* · "
-            "*'No more action movies'* · "
-            "*'What does SPD mean?'* · "
-            "*'Show all genres'*"
-        )
+        gr.HTML('<hr class="divider">')
 
-        chatbot = gr.Chatbot(height=340)
-        with gr.Row():
-            chat_input = gr.Textbox(placeholder="Ask about a recommendation or filter by genre...",
-                                    show_label=False, scale=5)
-            send_btn = gr.Button("Send", variant="primary", scale=1)
+        # ── Bottom Panels ─────────────────────────────────────────────────────
+        gr.Markdown('<div class="section-label">③ Comparison & metrics (for analysis)</div>')
 
-        # Hidden state
-        fair_list_state   = gr.State([])
-        fair_flags_state  = gr.State([])
-        excluded_state    = gr.State([])   # genres permanently hidden
-        include_state     = gr.State([])   # genre the user asked to see (recommend intent)
+        with gr.Accordion("📊 Fairness Metrics Dashboard", open=True):
+            metrics_img = gr.Image(label=None, show_label=False, elem_id="metrics-img",
+                                   show_download_button=True, height=420)
 
-        # Load initial recommendations
-        def initial_recs(user_id):
-            bt, ft, fl, ff = get_recommendations(int(user_id))
-            return bt, ft, fl, ff, [], []
+        with gr.Accordion("📋 Recommendation Lists (side-by-side comparison)", open=False):
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("**Baseline** — Relevance only (LightGCN scores, no fairness)")
+                    baseline_out = gr.Dataframe(interactive=False, wrap=True)
+                with gr.Column():
+                    gr.Markdown(f"**FA★IR Reranked** — Fairness target p = {P_FAIRNESS}")
+                    fair_out = gr.Dataframe(interactive=False, wrap=True)
 
-        demo.load(initial_recs, inputs=[user_input],
-                  outputs=[baseline_out, fair_out, fair_list_state, fair_flags_state, excluded_state, include_state])
+        # ── Wire up Persona Buttons ───────────────────────────────────────────
+        for pname, pbtn in persona_btns:
+            pbtn.click(
+                fn=lambda p=pname: select_persona(p),
+                inputs=[],
+                outputs=[user_id_state, user_badge, chatbot, baseline_out, fair_out,
+                         fair_list_state, fair_flags_state, metrics_img],
+            )
 
-        user_input.release(on_user_change, inputs=[user_input],
-                           outputs=[baseline_out, fair_out, fair_list_state, fair_flags_state, excluded_state, include_state])
+        # ── Wire up Suggestion Chips ──────────────────────────────────────────
+        chat_in_list = [chat_input, chatbot, user_id_state, fair_list_state, fair_flags_state, excluded_state, include_state]
+        chat_out_list = [chatbot, baseline_out, fair_out, excluded_state, include_state, fair_list_state, fair_flags_state, metrics_img]
 
-        chat_inputs  = [chat_input, chatbot, user_input, fair_list_state, fair_flags_state, excluded_state, include_state]
-        chat_outputs = [chatbot, baseline_out, fair_out, excluded_state, include_state]
+        for sbtn, suggestion in zip(sug_btns, SUGGESTIONS):
+            sbtn.click(
+                fn=lambda h, uid, fl, ff, ex, inc, s=suggestion:
+                    chat(s, h, uid, fl, ff, ex, inc),
+                inputs=[chatbot, user_id_state, fair_list_state, fair_flags_state, excluded_state, include_state],
+                outputs=chat_out_list,
+            )
 
-        send_btn.click(chat, inputs=chat_inputs, outputs=chat_outputs).then(
+        # ── Wire up Chat Send ─────────────────────────────────────────────────
+        send_btn.click(chat, inputs=chat_in_list, outputs=chat_out_list).then(
             lambda: "", outputs=chat_input)
-        chat_input.submit(chat, inputs=chat_inputs, outputs=chat_outputs).then(
+        chat_input.submit(chat, inputs=chat_in_list, outputs=chat_out_list).then(
             lambda: "", outputs=chat_input)
 
     return demo
 
 
 def build_error_ui():
-    with gr.Blocks(title="FA-CRS") as demo:
-        gr.Markdown("# Setup needed")
-        gr.Markdown(
-            "Run the pipeline first:\n\n"
-            "1. `python data_prep.py`\n"
-            "2. `python lightgcn_baseline.py`\n"
-            "3. `python heterogeneous_kg.py`\n\n"
-            f"Error: `{LOAD_ERROR}`"
-        )
+    with gr.Blocks(css=DARK_CSS, title="FA-CRS — Setup needed") as demo:
+        with gr.Group(elem_id="header-block"):
+            gr.Markdown("# FA-CRS — Setup needed")
+            gr.Markdown(
+                "Run the pipeline first:\n\n"
+                "1. `python data_prep.py`\n"
+                "2. `python lightgcn_baseline.py`\n"
+                "3. `python heterogeneous_kg.py`\n\n"
+                f"Error: `{LOAD_ERROR}`"
+            )
     return demo
 
 
 if __name__ == "__main__":
     app = build_ui() if READY else build_error_ui()
-    app.launch()
+    app.launch(css=DARK_CSS)

@@ -1,0 +1,110 @@
+User 0 | likes: ['Drama', 'Comedy', 'Romance'] | diversity: medium
+#1 Freeze Me (2000) — diversity pick (male, non-western), genres: Drama|Thriller
+#2 Adversary, The (L'adversaire) (2002) — diversity pick (female, western), genres: Crime|Drama|Mystery|Thriller
+#3 Southern Comfort (2001) — diversity pick (female, western), genres: Documentary
+#4 Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) — diversity pick (unknown, non-western), genres: Action|Fantasy|Sci-Fi
+#5 Boogeyman, The (1980) — diversity pick (unknown, non-western), genres: Horror
+#6 Blood: The Last Vampire (2000) — diversity pick (male, non-western), genres: Action|Animation|Horror
+#7 Run Ronnie Run (2002) — relevance pick, genres: Comedy
+#8 Dirty Deeds (2002) — relevance pick, genres: Action|Comedy|Crime
+#9 Shackleton's Antarctic Adventure (2001) — relevance pick, genres: Documentary|IMAX
+#10 Darkness (2002) — relevance pick, genres: Horror|Mystery
+  1. Freeze Me (2000) [male, non-western]
+  2. Adversary, The (L'adversaire) (2002) [female, western]
+  3. Southern Comfort (2001) [female, western]
+  4. Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) [unknown, non-western]
+  5. Boogeyman, The (1980) [unknown, non-western]
+  6. Blood: The Last Vampire (2000) [male, non-western]
+  7. Run Ronnie Run (2002) [male, western]
+  8. Dirty Deeds (2002) [male, western]
+  9. Shackleton's Antarctic Adventure (2001) [male, western]
+  10. Darkness (2002) [male, western]
+
+User 1 | likes: ['Drama', 'Adventure', 'Action'] | diversity: medium
+#1 Five, The (Gonin) (1995) — diversity pick (male, non-western), genres: Action|Crime|Drama
+#2 Freeze Me (2000) — diversity pick (male, non-western), genres: Drama|Thriller
+#3 Adversary, The (L'adversaire) (2002) — diversity pick (female, western), genres: Crime|Drama|Mystery|Thriller
+#4 Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) — diversity pick (unknown, non-western), genres: Action|Fantasy|Sci-Fi
+#5 Blood: The Last Vampire (2000) — diversity pick (male, non-western), genres: Action|Animation|Horror
+#6 Southern Comfort (2001) — diversity pick (female, western), genres: Documentary
+#7 Boogeyman, The (1980) — diversity pick (unknown, non-western), genres: Horror
+#8 Dirty Deeds (2002) — relevance pick, genres: Action|Comedy|Crime
+#9 Darkness (2002) — relevance pick, genres: Horror|Mystery
+#10 Run Ronnie Run (2002) — relevance pick, genres: Comedy
+  1. Five, The (Gonin) (1995) [male, non-western]
+  2. Freeze Me (2000) [male, non-western]
+  3. Adversary, The (L'adversaire) (2002) [female, western]
+  4. Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) [unknown, non-western]
+  5. Blood: The Last Vampire (2000) [male, non-western]
+  6. Southern Comfort (2001) [female, western]
+  7. Boogeyman, The (1980) [unknown, non-western]
+  8. Dirty Deeds (2002) [male, western]
+  9. Darkness (2002) [male, western]
+  10. Run Ronnie Run (2002) [male, western]
+
+User 2 | likes: ['Drama', 'Action', 'Thriller'] | diversity: medium
+#1 Freeze Me (2000) — diversity pick (male, non-western), genres: Drama|Thriller
+#2 Adversary, The (L'adversaire) (2002) — diversity pick (female, western), genres: Crime|Drama|Mystery|Thriller
+#3 Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) — diversity pick (unknown, non-western), genres: Action|Fantasy|Sci-Fi
+#4 Blood: The Last Vampire (2000) — diversity pick (male, non-western), genres: Action|Animation|Horror
+#5 Prince of Tides, The (1991) — diversity pick (female, western), genres: Drama|Romance
+#6 Southern Comfort (2001) — diversity pick (female, western), genres: Documentary
+#7 O Auto da Compadecida (Dog's Will, A) (2000) — diversity pick (unknown, non-western), genres: Adventure|Comedy
+#8 Dirty Deeds (2002) — relevance pick, genres: Action|Comedy|Crime
+#9 Run Ronnie Run (2002) — relevance pick, genres: Comedy
+#10 Darkness (2002) — relevance pick, genres: Horror|Mystery
+  1. Freeze Me (2000) [male, non-western]
+  2. Adversary, The (L'adversaire) (2002) [female, western]
+  3. Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) [unknown, non-western]
+  4. Blood: The Last Vampire (2000) [male, non-western]
+  5. Prince of Tides, The (1991) [female, western]
+  6. Southern Comfort (2001) [female, western]
+  7. O Auto da Compadecida (Dog's Will, A) (2000) [unknown, non-western]
+  8. Dirty Deeds (2002) [male, western]
+  9. Run Ronnie Run (2002) [male, western]
+  10. Darkness (2002) [male, western]
+
+User 3 | likes: ['Action', 'Comedy', 'Adventure'] | diversity: medium
+#1 O Auto da Compadecida (Dog's Will, A) (2000) — diversity pick (unknown, non-western), genres: Adventure|Comedy
+#2 Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) — diversity pick (unknown, non-western), genres: Action|Fantasy|Sci-Fi
+#3 Blood: The Last Vampire (2000) — diversity pick (male, non-western), genres: Action|Animation|Horror
+#4 Freeze Me (2000) — diversity pick (male, non-western), genres: Drama|Thriller
+#5 Adversary, The (L'adversaire) (2002) — diversity pick (female, western), genres: Crime|Drama|Mystery|Thriller
+#6 Southern Comfort (2001) — diversity pick (female, western), genres: Documentary
+#7 Boogeyman, The (1980) — diversity pick (unknown, non-western), genres: Horror
+#8 Run Ronnie Run (2002) — relevance pick, genres: Comedy
+#9 Darkness (2002) — relevance pick, genres: Horror|Mystery
+#10 Shackleton's Antarctic Adventure (2001) — relevance pick, genres: Documentary|IMAX
+  1. O Auto da Compadecida (Dog's Will, A) (2000) [unknown, non-western]
+  2. Godzilla, Mothra, and King Ghidorah: Giant Monsters All-Out Attack (Gojira, Mosura, Kingu Gidorâ: Daikaijû sôkôgeki) (Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack) (2001) [unknown, non-western]
+  3. Blood: The Last Vampire (2000) [male, non-western]
+  4. Freeze Me (2000) [male, non-western]
+  5. Adversary, The (L'adversaire) (2002) [female, western]
+  6. Southern Comfort (2001) [female, western]
+  7. Boogeyman, The (1980) [unknown, non-western]
+  8. Run Ronnie Run (2002) [male, western]
+  9. Darkness (2002) [male, western]
+  10. Shackleton's Antarctic Adventure (2001) [male, western]
+
+User 4 | likes: ['Comedy', 'Drama', 'Thriller'] | diversity: low
+#1 Ripley's Game (2002) — diversity pick (female, western), genres: Drama|Thriller
+#2 Long Time Dead (2002) — relevance pick, genres: Horror|Thriller
+#3 Laramie Project, The (2002) — relevance pick, genres: Crime|Drama
+#4 Final Conflict, The (a.k.a. Omen III: The Final Conflict) (1981) — relevance pick, genres: Horror|Thriller
+#5 Song of the Little Road (Pather Panchali) (1955) — diversity pick (male, non-western), genres: Drama
+#6 Now and Then (1995) — diversity pick (female, western), genres: Children|Drama
+#7 White Balloon, The (Badkonake sefid) (1995) — diversity pick (male, non-western), genres: Children|Drama
+#8 Picture Bride (Bijo photo) (1994) — diversity pick (female, western), genres: Drama|Romance
+#9 Treasure Planet (2002) — relevance pick, genres: Adventure|Animation|Children|Sci-Fi|IMAX
+#10 Akira (1988) — diversity pick (male, non-western), genres: Action|Adventure|Animation|Sci-Fi
+  1. Ripley's Game (2002) [female, western]
+  2. Long Time Dead (2002) [male, western]
+  3. Laramie Project, The (2002) [male, western]
+  4. Final Conflict, The (a.k.a. Omen III: The Final Conflict) (1981) [unknown, unknown]
+  5. Song of the Little Road (Pather Panchali) (1955) [male, non-western]
+  6. Now and Then (1995) [female, western]
+  7. White Balloon, The (Badkonake sefid) (1995) [male, non-western]
+  8. Picture Bride (Bijo photo) (1994) [female, western]
+  9. Treasure Planet (2002) [male, western]
+  10. Akira (1988) [male, non-western]
+
