@@ -6,3 +6,9 @@ outputs/kg/kg_graph.pt
 __pycache__/
 *.pyc
 tmdb_cache.csv
+
+outputs/kg/candidate_pools.pkl
+outputs/kg/kg_graph.pt
+outputs/kg/best_model_kg.pt
+frontend/node_modules/
+frontend/dist/
