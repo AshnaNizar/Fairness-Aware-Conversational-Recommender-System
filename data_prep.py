@@ -1,24 +1,3 @@
-"""
-Steps:
-1. Load MovieLens 1M data
-2. Fetch director name + production countries from TMDb API
-3. Annotate director gender using gender-guesser
-4. Classify production country as western / non-western
-5. Save enriched CSV for graph building (Day 4+)
-
-Requirements:
-    pip install requests gender-guesser pandas tqdm
-
-Directory structure expected:
-    /data/ml-1m/
-        ratings.dat
-        movies.dat
-        users.dat
-
-Download MovieLens 1M from:
-    https://grouplens.org/datasets/movielens/1m/
-"""
-
 import os
 import time
 import requests
@@ -130,10 +109,7 @@ def fetch_tmdb_data(title, year, api_key):
 # ─── GENDER ANNOTATION ────────────────────────────────────────────────────────
 
 def annotate_gender(name, detector):
-    """
-    Use gender-guesser on first name.
-    Returns: 'female', 'male', or 'unknown'
-    """
+
     if not name:
         return "unknown"
     first_name = name.strip().split()[0]
@@ -149,12 +125,7 @@ def annotate_gender(name, detector):
 # ─── REGION CLASSIFICATION ────────────────────────────────────────────────────
 
 def classify_region(country_codes):
-    """
-    Given a list of ISO country codes, classify the movie as:
-    - 'western' if any production country is western
-    - 'non-western' if all are non-western
-    - 'unknown' if no country data
-    """
+
     if not country_codes:
         return "unknown"
     for code in country_codes:

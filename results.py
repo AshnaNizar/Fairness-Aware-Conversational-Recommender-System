@@ -1,136 +1,156 @@
 """
-FA-CRS Day 13-15: Results Figures + Final Paper Table
-------------------------------------------------------
-Reads the JSON outputs from all previous steps and produces:
+results.py — FA-CRS figures and final tables (Option B two-system version)
 
-1. results_table.txt       — formatted comparison table for paper
-2. fut_curve_ndcg.png      — FUT curve: NDCG vs p (accuracy tradeoff)
-3. fut_curve_spd.png       — FUT curve: SPD vs p (fairness improvement)
-4. fut_curve_combined.png  — both axes on one figure (main paper figure)
-5. bias_comparison.png     — bar chart: SPD across three systems
+Reads outputs/fair/fair_results.json (produced by the Option B fair_rerank.py,
+which contains norerank_metrics + fut_curve on the SAME candidates), and
+produces the tables/figures for the writeup:
 
-Requirements:
-    pip install matplotlib
+  outputs/figures/results_table.txt      — main comparison table
+  outputs/figures/fut_curve_combined.png — main paper figure (FUT curve)
+  outputs/figures/bias_comparison.png    — SPD bars: no-rerank vs FA*IR
+  outputs/figures/accuracy_comparison.png — NDCG/P/R bars: no-rerank vs FA*IR
+  outputs/figures/collapse_curve.png     — collapse rate vs p (honest limitation)
+
+Run:
+    python results.py
 """
 
 import json
 import os
 import matplotlib
-matplotlib.use("Agg")  # no display needed
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
+
 
 OUTPUT_DIR = "outputs/figures"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+
 # ─── LOAD RESULTS ─────────────────────────────────────────────────────────────
 
-with open("outputs/baseline/baseline_results.json") as f:
-    baseline = json.load(f)
+def _load_first(paths, name):
+    for p in paths:
+        if os.path.exists(p):
+            print(f"Loaded {name}: {p}")
+            with open(p) as f:
+                return json.load(f)
+    raise FileNotFoundError(f"{name} not found in any of: {paths}")
 
-with open("outputs/kg/kg_results.json") as f:
-    kg = json.load(f)
 
-with open("outputs/fair/fair_results.json") as f:
-    fair = json.load(f)
+fair = _load_first(
+    ["outputs/fair/fair_results.json",
+     "outputs/kg/fair_results.json",
+     "fair_results.json"],
+    "fair results"
+)
 
-fut = fair["fut_curve"]
-p_values = [r["p"] for r in fut]
+if "norerank_metrics" not in fair:
+    raise SystemExit(
+        "ERROR: fair_results.json has no 'norerank_metrics' block. "
+        "Rerun with the Option B fair_rerank.py that computes the same-run "
+        "no-rerank baseline."
+    )
 
-# ─── 1. FORMATTED RESULTS TABLE ───────────────────────────────────────────────
+norerank  = fair["norerank_metrics"]
+fut       = fair["fut_curve"]
+p_values  = [r["p"] for r in fut]
+
+# Pick primary_p: the FUT row closest to 0.3 (where the reranker fires but
+# collapse is still comparable to the no-rerank baseline).
+PRIMARY_P = min(p_values, key=lambda x: abs(x - 0.30))
+primary   = next(r for r in fut if r["p"] == PRIMARY_P)
+
+
+# ─── 1. RESULTS TABLE ─────────────────────────────────────────────────────────
 
 def make_table():
-    primary = next(r for r in fut if r["p"] == 0.3)
-
     lines = []
-    lines.append("=" * 72)
-    lines.append("TABLE 1: System Comparison (FA-CRS on MovieLens-25M)")
-    lines.append("=" * 72)
-    lines.append(f"{'Metric':<22} {'Baseline':>12} {'KG':>12} {'KG+FA*IR':>12} {'Δ (Fair)':>12}")
-    lines.append("-" * 72)
+    lines.append("=" * 76)
+    lines.append("TABLE 1: LightGCN vs LightGCN+FA*IR")
+    lines.append("Same run, same candidates, identical test split.")
+    lines.append(f"Primary operating point: p={PRIMARY_P:.2f}")
+    lines.append("=" * 76)
+    lines.append(f"{'Metric':<26} {'No-Rerank':>12} {'FA*IR':>12} {'Delta':>12}")
+    lines.append("-" * 76)
 
     rows = [
-        ("NDCG@10",       "ndcg_at_10"),
-        ("Precision@10",  "precision_at_10"),
-        ("Recall@10",     "recall_at_10"),
-        ("Gender SPD",    "gender_spd"),
-        ("Gender EOD",    "gender_eod"),
-        ("Region SPD",    "region_spd"),
-        ("Region EOD",    "region_eod"),
+        ("NDCG@10",              "ndcg_at_10"),
+        ("Precision@10",         "precision_at_10"),
+        ("Recall@10",            "recall_at_10"),
+        ("Gender SPD",           "gender_spd"),
+        ("Gender EOD",           "gender_eod"),
+        ("Region SPD",           "region_spd"),
+        ("Region EOD",           "region_eod"),
+        ("Gender rND",           "gender_rND"),
+        ("Gender Exposure Gap",  "gender_exposure_gap"),
+        ("Gender Collapse Rate", "gender_collapse_rate"),
+        ("Region rND",           "region_rND"),
+        ("Region Exposure Gap",  "region_exposure_gap"),
+        ("Region Collapse Rate", "region_collapse_rate"),
+        ("Gini Exposure",        "gini_exposure"),
+        ("Catalog Coverage",     "catalog_coverage"),
     ]
-
     for label, key in rows:
-        b = baseline.get(key, 0)
-        k = kg.get(key, 0)
-        f = primary.get(key, 0)
-        d = f - k
-        lines.append(f"{label:<22} {b:>12.4f} {k:>12.4f} {f:>12.4f} {d:>+12.4f}")
+        nb = norerank.get(key)
+        fv = primary.get(key)
+        if nb is None or fv is None:
+            continue
+        d = fv - nb
+        lines.append(f"{label:<26} {nb:>12.4f} {fv:>12.4f} {d:>+12.4f}")
 
-    lines.append("=" * 72)
-    lines.append("FA*IR p=0.3, alpha=0.1. Δ = KG+FA*IR minus KG.")
+    lines.append("=" * 76)
     lines.append("")
-    lines.append("Key findings:")
-    lines.append(f"  Gender SPD improved by {primary['gender_spd'] - kg['gender_spd']:+.4f} ({abs((primary['gender_spd'] - kg['gender_spd']) / kg['gender_spd']) * 100:.1f}% reduction in bias)")
-    lines.append(f"  Region SPD improved by {primary['region_spd'] - kg['region_spd']:+.4f} ({abs((primary['region_spd'] - kg['region_spd']) / kg['region_spd']) * 100:.1f}% reduction in bias)")
-    lines.append(f"  NDCG@10 cost:          {primary['ndcg_at_10'] - kg['ndcg_at_10']:+.4f}")
+    lines.append("Reading:")
+    g_d = primary["gender_spd"] - norerank["gender_spd"]
+    r_d = primary["region_spd"] - norerank["region_spd"]
+    n_d = primary["ndcg_at_10"] - norerank["ndcg_at_10"]
+    lines.append(f"  Gender SPD change: {g_d:+.4f}  (positive = bias reduced)")
+    lines.append(f"  Region SPD change: {r_d:+.4f}  (positive = bias reduced)")
+    lines.append(f"  NDCG cost:         {n_d:+.4f}")
+    lines.append("")
+    lines.append("Note: Collapse Rate rises with p — see collapse_curve.png.")
 
-    table_str = "\n".join(lines)
-    print(table_str)
-
+    s = "\n".join(lines)
+    print(s)
     with open(os.path.join(OUTPUT_DIR, "results_table.txt"), "w", encoding="utf-8") as f:
-        f.write(table_str)
+        f.write(s)
     print(f"\nSaved: results_table.txt")
 
 
-# ─── 2. FUT CURVE — COMBINED (main paper figure) ──────────────────────────────
+# ─── 2. FUT CURVE ─────────────────────────────────────────────────────────────
 
 def plot_fut_combined():
-    ndcg_vals   = [r["ndcg_at_10"]  for r in fut]
-    gender_spd  = [abs(r["gender_spd"]) for r in fut]  # abs so higher = more bias
-    region_spd  = [abs(r["region_spd"]) for r in fut]
+    ndcg_vals  = [r["ndcg_at_10"] for r in fut]
+    gender_spd = [abs(r["gender_spd"]) for r in fut]
+    region_spd = [abs(r["region_spd"]) for r in fut]
 
-    fig, ax1 = plt.subplots(figsize=(7, 4.5))
+    fig, ax1 = plt.subplots(figsize=(7.5, 4.8))
+    c_ndcg, c_g, c_r = "#2563EB", "#DC2626", "#16A34A"
 
-    color_ndcg   = "#2563EB"
-    color_gender = "#DC2626"
-    color_region = "#16A34A"
-
-    ax1.plot(p_values, ndcg_vals, "o-", color=color_ndcg,
-             linewidth=2, markersize=6, label="NDCG@10 (accuracy)")
-    ax1.set_xlabel("Fairness Constraint Strength (p)", fontsize=12)
-    ax1.set_ylabel("NDCG@10", fontsize=12, color=color_ndcg)
-    ax1.tick_params(axis="y", labelcolor=color_ndcg)
+    ax1.plot(p_values, ndcg_vals, "o-", color=c_ndcg, lw=2, ms=6,
+             label="NDCG@10 (accuracy)")
+    ax1.set_xlabel("Fairness Constraint Strength (p)", fontsize=11)
+    ax1.set_ylabel("NDCG@10", fontsize=11, color=c_ndcg)
+    ax1.tick_params(axis="y", labelcolor=c_ndcg)
     ax1.set_ylim(0, max(ndcg_vals) * 1.4)
 
     ax2 = ax1.twinx()
-    ax2.plot(p_values, gender_spd, "s--", color=color_gender,
-             linewidth=2, markersize=6, label="|Gender SPD|")
-    ax2.plot(p_values, region_spd, "^--", color=color_region,
-             linewidth=2, markersize=6, label="|Region SPD|")
-    ax2.set_ylabel("|SPD| (lower = fairer)", fontsize=12)
+    ax2.plot(p_values, gender_spd, "s--", color=c_g, lw=2, ms=6, label="|Gender SPD|")
+    ax2.plot(p_values, region_spd, "^--", color=c_r, lw=2, ms=6, label="|Region SPD|")
+    ax2.set_ylabel("|SPD| (lower = fairer)", fontsize=11)
     ax2.set_ylim(0, 1.1)
 
-    # Reference lines for baseline bias
-    ax2.axhline(abs(baseline["gender_spd"]), color=color_gender,
-                linestyle=":", linewidth=1, alpha=0.5)
-    ax2.axhline(abs(baseline["region_spd"]), color=color_region,
-                linestyle=":", linewidth=1, alpha=0.5)
+    ax2.axhline(abs(norerank["gender_spd"]), color=c_g, ls=":", lw=1, alpha=0.6)
+    ax2.axhline(abs(norerank["region_spd"]), color=c_r, ls=":", lw=1, alpha=0.6)
 
-    # Annotate baseline reference lines
-    ax2.text(p_values[-1] + 0.01, abs(baseline["gender_spd"]),
-             "Baseline\nGender SPD", fontsize=7, color=color_gender, va="center")
-    ax2.text(p_values[-1] + 0.01, abs(baseline["region_spd"]) - 0.04,
-             "Baseline\nRegion SPD", fontsize=7, color=color_region, va="center")
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="center left", fontsize=9, framealpha=0.9)
 
-    # Combined legend
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2,
-               loc="upper right", fontsize=9, framealpha=0.9)
-
-    plt.title("Fairness-Utility Tradeoff (FUT) Curve\nKG + FA*IR on MovieLens-25M",
-              fontsize=12, fontweight="bold")
+    plt.title("Fairness-Utility Tradeoff (FUT) Curve\n"
+              "Larger p -> stronger fairness constraint, lower NDCG",
+              fontsize=11, fontweight="bold")
     plt.tight_layout()
     path = os.path.join(OUTPUT_DIR, "fut_curve_combined.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -138,49 +158,29 @@ def plot_fut_combined():
     print(f"Saved: fut_curve_combined.png")
 
 
-# ─── 3. BIAS COMPARISON BAR CHART ─────────────────────────────────────────────
+# ─── 3. BIAS COMPARISON ───────────────────────────────────────────────────────
 
 def plot_bias_comparison():
-    primary = next(r for r in fut if r["p"] == 0.3)
+    systems = ["No-Rerank", f"FA*IR (p={PRIMARY_P:.2f})"]
+    g = [abs(norerank["gender_spd"]), abs(primary["gender_spd"])]
+    r = [abs(norerank["region_spd"]), abs(primary["region_spd"])]
 
-    systems = ["Baseline", "KG", "KG+FA*IR\n(p=0.3)"]
-    gender_spd_vals = [
-        abs(baseline["gender_spd"]),
-        abs(kg["gender_spd"]),
-        abs(primary["gender_spd"])
-    ]
-    region_spd_vals = [
-        abs(baseline["region_spd"]),
-        abs(kg["region_spd"]),
-        abs(primary["region_spd"])
-    ]
-
-    x     = np.arange(len(systems))
-    width = 0.35
-
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    bars1 = ax.bar(x - width/2, gender_spd_vals, width,
-                   label="|Gender SPD|", color="#DC2626", alpha=0.85)
-    bars2 = ax.bar(x + width/2, region_spd_vals, width,
-                   label="|Region SPD|", color="#16A34A", alpha=0.85)
-
-    # Value labels on bars
-    for bar in bars1:
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                f"{bar.get_height():.3f}", ha="center", va="bottom", fontsize=9)
-    for bar in bars2:
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+    x = np.arange(len(systems)); w = 0.35
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    b1 = ax.bar(x - w/2, g, w, label="|Gender SPD|", color="#DC2626", alpha=0.85)
+    b2 = ax.bar(x + w/2, r, w, label="|Region SPD|", color="#16A34A", alpha=0.85)
+    for bar in list(b1) + list(b2):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
                 f"{bar.get_height():.3f}", ha="center", va="bottom", fontsize=9)
 
-    ax.set_ylabel("|SPD| (lower = fairer)", fontsize=12)
-    ax.set_title("Bias Comparison Across Systems\n(Statistical Parity Difference)",
-                 fontsize=12, fontweight="bold")
-    ax.set_xticks(x)
-    ax.set_xticklabels(systems, fontsize=11)
-    ax.set_ylim(0, 1.2)
+    ax.set_ylabel("|SPD| (lower = fairer)", fontsize=11)
+    ax.set_title(f"Bias Reduction: No-Rerank vs FA*IR (p={PRIMARY_P:.2f})\n"
+                 "Same run — only difference is reranking",
+                 fontsize=11, fontweight="bold")
+    ax.set_xticks(x); ax.set_xticklabels(systems, fontsize=10)
+    ax.set_ylim(0, 1.15)
     ax.legend(fontsize=10)
     ax.grid(axis="y", alpha=0.3)
-
     plt.tight_layout()
     path = os.path.join(OUTPUT_DIR, "bias_comparison.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
@@ -188,48 +188,58 @@ def plot_bias_comparison():
     print(f"Saved: bias_comparison.png")
 
 
-# ─── 4. ACCURACY ACROSS SYSTEMS ───────────────────────────────────────────────
+# ─── 4. ACCURACY COMPARISON ───────────────────────────────────────────────────
 
 def plot_accuracy_comparison():
-    primary = next(r for r in fut if r["p"] == 0.3)
+    systems = ["No-Rerank", f"FA*IR (p={PRIMARY_P:.2f})"]
+    ndcg = [norerank["ndcg_at_10"], primary["ndcg_at_10"]]
+    prec = [norerank["precision_at_10"], primary["precision_at_10"]]
+    rec  = [norerank["recall_at_10"], primary["recall_at_10"]]
 
-    systems = ["Baseline", "KG", "KG+FA*IR\n(p=0.3)"]
-    ndcg_vals = [
-        baseline["ndcg_at_10"],
-        kg["ndcg_at_10"],
-        primary["ndcg_at_10"]
-    ]
-    prec_vals = [
-        baseline["precision_at_10"],
-        kg["precision_at_10"],
-        primary["precision_at_10"]
-    ]
-    rec_vals = [
-        baseline["recall_at_10"],
-        kg["recall_at_10"],
-        primary["recall_at_10"]
-    ]
+    x = np.arange(len(systems)); w = 0.25
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    ax.bar(x - w, ndcg, w, label="NDCG@10", color="#2563EB", alpha=0.85)
+    ax.bar(x,      prec, w, label="Precision@10", color="#7C3AED", alpha=0.85)
+    ax.bar(x + w,  rec,  w, label="Recall@10", color="#0891B2", alpha=0.85)
 
-    x     = np.arange(len(systems))
-    width = 0.25
-
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.bar(x - width, ndcg_vals,  width, label="NDCG@10",      color="#2563EB", alpha=0.85)
-    ax.bar(x,         prec_vals,  width, label="Precision@10",  color="#7C3AED", alpha=0.85)
-    ax.bar(x + width, rec_vals,   width, label="Recall@10",     color="#0891B2", alpha=0.85)
-
-    ax.set_ylabel("Score", fontsize=12)
-    ax.set_title("Accuracy Metrics Across Systems", fontsize=12, fontweight="bold")
-    ax.set_xticks(x)
-    ax.set_xticklabels(systems, fontsize=11)
+    ax.set_ylabel("Score", fontsize=11)
+    ax.set_title("Accuracy Cost of FA*IR Reranking", fontsize=11, fontweight="bold")
+    ax.set_xticks(x); ax.set_xticklabels(systems, fontsize=10)
     ax.legend(fontsize=10)
     ax.grid(axis="y", alpha=0.3)
-
     plt.tight_layout()
     path = os.path.join(OUTPUT_DIR, "accuracy_comparison.png")
     plt.savefig(path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved: accuracy_comparison.png")
+
+
+# ─── 5. COLLAPSE RATE CURVE ───────────────────────────────────────────────────
+
+def plot_collapse_curve():
+    g_col = [r["gender_collapse_rate"] for r in fut]
+    r_col = [r["region_collapse_rate"] for r in fut]
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    ax.plot(p_values, g_col, "s-", color="#DC2626", lw=2, ms=6,
+            label="Gender Collapse Rate")
+    ax.plot(p_values, r_col, "^-", color="#16A34A", lw=2, ms=6,
+            label="Region Collapse Rate")
+    ax.axhline(norerank["gender_collapse_rate"], color="#DC2626", ls=":", lw=1, alpha=0.5)
+    ax.axhline(norerank["region_collapse_rate"], color="#16A34A", ls=":", lw=1, alpha=0.5)
+
+    ax.set_xlabel("Fairness Constraint Strength (p)", fontsize=11)
+    ax.set_ylabel("Collapse Rate (lower = more diverse)", fontsize=11)
+    ax.set_title("Collapse Rate vs p — the scarce-supply limitation",
+                 fontsize=11, fontweight="bold")
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=10, loc="lower right")
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    path = os.path.join(OUTPUT_DIR, "collapse_curve.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: collapse_curve.png")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -241,13 +251,8 @@ def main():
     plot_fut_combined()
     plot_bias_comparison()
     plot_accuracy_comparison()
-
+    plot_collapse_curve()
     print(f"\nAll figures saved to: {OUTPUT_DIR}/")
-    print("\nFiles for your paper:")
-    print("  - results_table.txt       -> paste into Table 1")
-    print("  - fut_curve_combined.png  -> main contribution figure")
-    print("  - bias_comparison.png     -> fairness results figure")
-    print("  - accuracy_comparison.png -> accuracy results figure")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+{
+  "model": "LightGCN_bipartite_baseline",
+  "precision_at_10": 0.0097,
+  "recall_at_10": 0.0273,
+  "ndcg_at_10": 0.0148,
+  "gender_spd": -0.7482,
+  "gender_eod": -0.001,
+  "region_spd": -0.9992,
+  "region_eod": -0.0108,
+  "gender_rND": 0.1165,
+  "gender_exposure_gap": 0.0141,
+  "gender_collapse_rate": 0.9994,
+  "region_rND": 0.0003,
+  "region_exposure_gap": -0.0796,
+  "region_collapse_rate": 0.6417,
+  "gini_exposure": 0.9833,
+  "catalog_coverage": 0.035
+}

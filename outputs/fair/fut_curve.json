@@ -1,52 +1,300 @@
 [
   {
     "p": 0.1,
-    "ndcg_at_10": 0.0021,
-    "precision_at_10": 0.002,
-    "recall_at_10": 0.0025,
-    "gender_spd": -0.7546,
-    "gender_eod": 0.0007,
-    "region_spd": -0.7857,
-    "region_eod": -0.0027
+    "ndcg_at_10": 0.0127,
+    "precision_at_10": 0.0122,
+    "recall_at_10": 0.0113,
+    "gender_spd": -0.7995,
+    "gender_eod": 0.0028,
+    "region_spd": -1.0,
+    "region_eod": -0.0046,
+    "gender_rND": 0.1064,
+    "gender_exposure_gap": 0.0864,
+    "gender_collapse_rate": 0.9994,
+    "gender_collapse_top": [
+      [
+        84,
+        4313
+      ],
+      [
+        1385,
+        3607
+      ],
+      [
+        3874,
+        19
+      ],
+      [
+        35,
+        17
+      ],
+      [
+        363,
+        3
+      ]
+    ],
+    "region_rND": 0.0,
+    "region_exposure_gap": -0.1257,
+    "region_collapse_rate": 0.0,
+    "region_collapse_top": [
+      [
+        2359,
+        1
+      ],
+      [
+        3915,
+        1
+      ]
+    ],
+    "gini_exposure": 0.8353,
+    "catalog_coverage": 0.04
   },
   {
     "p": 0.2,
-    "ndcg_at_10": 0.0016,
-    "precision_at_10": 0.0013,
-    "recall_at_10": 0.0021,
-    "gender_spd": -0.4493,
-    "gender_eod": 0.0008,
-    "region_spd": -0.5791,
-    "region_eod": -0.0021
+    "ndcg_at_10": 0.0118,
+    "precision_at_10": 0.0109,
+    "recall_at_10": 0.0105,
+    "gender_spd": -0.7274,
+    "gender_eod": 0.0052,
+    "region_spd": -0.7982,
+    "region_eod": 0.0274,
+    "gender_rND": 0.1324,
+    "gender_exposure_gap": 0.0262,
+    "gender_collapse_rate": 0.9959,
+    "gender_collapse_top": [
+      [
+        84,
+        4311
+      ],
+      [
+        1385,
+        3607
+      ],
+      [
+        35,
+        1155
+      ],
+      [
+        363,
+        343
+      ],
+      [
+        615,
+        208
+      ]
+    ],
+    "region_rND": 0.0878,
+    "region_exposure_gap": -0.1704,
+    "region_collapse_rate": 0.9949,
+    "region_collapse_top": [
+      [
+        2359,
+        2383
+      ],
+      [
+        184,
+        1650
+      ],
+      [
+        1080,
+        1318
+      ],
+      [
+        86,
+        826
+      ],
+      [
+        2812,
+        563
+      ]
+    ],
+    "gini_exposure": 0.8669,
+    "catalog_coverage": 0.0563
   },
   {
     "p": 0.3,
-    "ndcg_at_10": 0.001,
-    "precision_at_10": 0.0006,
-    "recall_at_10": 0.0017,
-    "gender_spd": -0.2069,
-    "gender_eod": 0.0014,
-    "region_spd": -0.3802,
-    "region_eod": -0.0014
+    "ndcg_at_10": 0.0114,
+    "precision_at_10": 0.0104,
+    "recall_at_10": 0.0101,
+    "gender_spd": -0.6994,
+    "gender_eod": 0.0059,
+    "region_spd": -0.5975,
+    "region_eod": 0.0475,
+    "gender_rND": 0.13,
+    "gender_exposure_gap": 0.0223,
+    "gender_collapse_rate": 0.996,
+    "gender_collapse_top": [
+      [
+        84,
+        4308
+      ],
+      [
+        1385,
+        3607
+      ],
+      [
+        35,
+        1155
+      ],
+      [
+        1167,
+        778
+      ],
+      [
+        363,
+        343
+      ]
+    ],
+    "region_rND": 0.1477,
+    "region_exposure_gap": -0.1646,
+    "region_collapse_rate": 0.9966,
+    "region_collapse_top": [
+      [
+        2359,
+        2383
+      ],
+      [
+        184,
+        2374
+      ],
+      [
+        1080,
+        2256
+      ],
+      [
+        86,
+        1923
+      ],
+      [
+        2812,
+        1581
+      ]
+    ],
+    "gini_exposure": 0.8625,
+    "catalog_coverage": 0.0573
   },
   {
     "p": 0.4,
-    "ndcg_at_10": 0.0007,
-    "precision_at_10": 0.0004,
-    "recall_at_10": 0.0011,
-    "gender_spd": -0.1824,
-    "gender_eod": 0.0018,
-    "region_spd": -0.1819,
-    "region_eod": -0.0013
+    "ndcg_at_10": 0.0109,
+    "precision_at_10": 0.0101,
+    "recall_at_10": 0.01,
+    "gender_spd": -0.5531,
+    "gender_eod": 0.0151,
+    "region_spd": -0.5981,
+    "region_eod": 0.0478,
+    "gender_rND": 0.1424,
+    "gender_exposure_gap": -0.0406,
+    "gender_collapse_rate": 0.9965,
+    "gender_collapse_top": [
+      [
+        84,
+        4318
+      ],
+      [
+        1385,
+        3607
+      ],
+      [
+        35,
+        2278
+      ],
+      [
+        363,
+        1422
+      ],
+      [
+        615,
+        966
+      ]
+    ],
+    "region_rND": 0.1103,
+    "region_exposure_gap": -0.1016,
+    "region_collapse_rate": 0.9966,
+    "region_collapse_top": [
+      [
+        2359,
+        2383
+      ],
+      [
+        184,
+        2374
+      ],
+      [
+        1080,
+        2256
+      ],
+      [
+        86,
+        1923
+      ],
+      [
+        2812,
+        1581
+      ]
+    ],
+    "gini_exposure": 0.8575,
+    "catalog_coverage": 0.0575
   },
   {
     "p": 0.5,
-    "ndcg_at_10": 0.0006,
-    "precision_at_10": 0.0003,
-    "recall_at_10": 0.0011,
-    "gender_spd": -0.1597,
-    "gender_eod": 0.0018,
-    "region_spd": 0.0125,
-    "region_eod": 0.001
+    "ndcg_at_10": 0.0099,
+    "precision_at_10": 0.0096,
+    "recall_at_10": 0.0098,
+    "gender_spd": -0.2985,
+    "gender_eod": 0.0255,
+    "region_spd": -0.3986,
+    "region_eod": 0.067,
+    "gender_rND": 0.1701,
+    "gender_exposure_gap": -0.084,
+    "gender_collapse_rate": 0.9974,
+    "gender_collapse_top": [
+      [
+        84,
+        4319
+      ],
+      [
+        1385,
+        3607
+      ],
+      [
+        35,
+        2908
+      ],
+      [
+        363,
+        2206
+      ],
+      [
+        1167,
+        1828
+      ]
+    ],
+    "region_rND": 0.1357,
+    "region_exposure_gap": -0.0912,
+    "region_collapse_rate": 0.9972,
+    "region_collapse_top": [
+      [
+        1080,
+        2414
+      ],
+      [
+        184,
+        2404
+      ],
+      [
+        2359,
+        2383
+      ],
+      [
+        86,
+        2345
+      ],
+      [
+        2812,
+        2198
+      ]
+    ],
+    "gini_exposure": 0.8401,
+    "catalog_coverage": 0.0553
   }
 ]

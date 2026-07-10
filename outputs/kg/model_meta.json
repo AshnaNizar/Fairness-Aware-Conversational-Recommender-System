@@ -1,0 +1,6 @@
+{
+  "n_users": 91691,
+  "n_movies": 4000,
+  "embedding_dim": 32,
+  "num_layers": 2
+}

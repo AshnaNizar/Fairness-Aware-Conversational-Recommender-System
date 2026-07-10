@@ -1,30 +1,3 @@
-"""
-FA-CRS Day 10-12: FA*IR Reranking + Explanation Module
--------------------------------------------------------
-Loads the trained KG model from Day 7-9 and applies FA*IR reranking
-to enforce fairness constraints on the top-K recommendations.
-
-FA*IR algorithm:
-  - Works through recommendation positions one by one
-  - At each position checks if the proportion of the protected group
-    (female-directed, non-western) meets a minimum threshold p
-  - If not, pulls in the highest-scoring movie from that group
-  - Controlled by two parameters:
-      p     : minimum proportion for protected group (default 0.3)
-      alpha : significance level for the statistical test (default 0.1)
-
-Explanation module:
-  - Template-based strings explaining each recommendation
-  - Tags each movie as relevance-driven or fairness-driven
-
-Output:
-  - outputs/fair/fair_results.json
-  - outputs/fair/full_comparison_table.json
-  - outputs/fair/example_recommendations.txt  (sample explanations)
-
-Requirements: same as Day 7-9
-"""
-
 import os
 import json
 import math
@@ -37,22 +10,28 @@ from torch_geometric.nn import LightGCN
 from torch_geometric.utils import structured_negative_sampling
 from tqdm import tqdm
 
+# fa_crs_core.py and metrics_extended.py must sit in the same directory.
+from fa_crs_core import fair_rerank as core_fair_rerank, ExposureTracker, diversified_injection, min_protected
+from metrics_extended import evaluate_extended
+
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
 DATA_DIR      = "data"
 KG_OUTPUT_DIR = "outputs/kg"
 OUTPUT_DIR    = "outputs/fair"
-EMBEDDING_DIM = 32
-NUM_LAYERS    = 2
-MIN_RATING    = 4
+EMBEDDING_DIM = 64      
+NUM_LAYERS    = 3       
+MIN_RATING    = 3       
 TOP_K         = 10
 RANDOM_SEED   = 42
 
 # FA*IR parameters
 # p: minimum proportion of protected group in top-K
-# Try multiple values to generate the FUT curve for your paper
-FAIR_P_VALUES = [0.1, 0.2, 0.3, 0.4, 0.5]
-FAIR_ALPHA    = 0.1   # significance level
+
+FAIR_P_VALUES = [0.10, 0.20, 0.30, 0.40, 0.50] 
+EVAL_USERS = 8000
+FAIR_ALPHA    = 0.15  
+RERANK_DEPTH  = 10    
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 torch.manual_seed(RANDOM_SEED)
@@ -60,15 +39,50 @@ np.random.seed(RANDOM_SEED)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+EXPOSURE_TRACKER = ExposureTracker()
+
 # ─── LOAD DATA ────────────────────────────────────────────────────────────────
 
+
+class EmbeddingHolder:
+    def __init__(self, user_emb, movie_emb):
+        self.user_emb  = user_emb
+        self.movie_emb = movie_emb
+    def eval(self):
+        return self
+    def __call__(self, edge_index=None):
+        return self.user_emb, self.movie_emb
+
+
 def load_data():
+
+    _subset  = os.path.join(KG_OUTPUT_DIR, "movies_subset.csv")
+    _train_p = os.path.join(KG_OUTPUT_DIR, "train_subset.csv")
+
+    if os.path.exists(_subset) and os.path.exists(_train_p):
+        # Trained-subset path: trust the saved indices, do NOT remap.
+        movies = pd.read_csv(_subset)
+        movies = movies.dropna(subset=["movie_idx"]).copy()
+        movies["movie_idx"] = movies["movie_idx"].astype(int)
+        for col, d in [("director", "Unknown Director"),
+                       ("director_gender", "unknown"),
+                       ("region", "unknown"), ("genres", "Unknown")]:
+            if col in movies.columns:
+                movies[col] = movies[col].fillna(d)
+
+        train = pd.read_csv(_train_p)
+        n_users  = int(train["user_idx"].max()) + 1
+        n_movies = int(movies["movie_idx"].max()) + 1
+        # pos/user2idx/movie2idx are not needed downstream when subset files exist
+        # (main() loads train/test subsets directly), so return minimal stand-ins.
+        pos = train[["user_idx", "movie_idx"]].copy()
+        return pos, movies, {}, {}, n_users, n_movies
+
+    # ── Fallback: no subset files, rebuild from the full catalogue ──
     ratings = pd.read_csv(os.path.join(DATA_DIR, "ratings.csv"))
     movies  = pd.read_csv(os.path.join(DATA_DIR, "movies_enriched.csv"))
 
     pos = ratings[ratings["rating"] >= MIN_RATING][["user_id", "movie_id"]].copy()
-
-    # ── ADD THIS: Keep only active users (>=20 interactions) ──
     user_counts  = pos["user_id"].value_counts()
     active_users = user_counts[user_counts >= 20].index
     pos = pos[pos["user_id"].isin(active_users)].copy()
@@ -77,26 +91,16 @@ def load_data():
     movie_ids = sorted(pos["movie_id"].unique())
     user2idx  = {u: i for i, u in enumerate(user_ids)}
     movie2idx = {m: i for i, m in enumerate(movie_ids)}
-
     pos["user_idx"]  = pos["user_id"].map(user2idx)
     pos["movie_idx"] = pos["movie_id"].map(movie2idx)
-
-    n_users  = len(user_ids)
-    n_movies = len(movie_ids)
+    n_users, n_movies = len(user_ids), len(movie_ids)
 
     movies["movie_idx"] = movies["movie_id"].map(movie2idx)
     movies = movies.dropna(subset=["movie_idx"]).copy()
     movies["movie_idx"] = movies["movie_idx"].astype(int)
-    movies["director"]        = movies["director"].fillna("Unknown Director")
-    movies["director_gender"] = movies["director_gender"].fillna("unknown")
-    movies["region"]          = movies["region"].fillna("unknown")
-    movies["genres"]          = movies["genres"].fillna("Unknown")
-
-    # ── ADD THIS: Keep only directors with 2+ movies ──
-    director_counts    = movies["director"].value_counts()
-    frequent_directors = set(director_counts[director_counts >= 2].index)
-    movies["director"] = movies["director"].apply(
-        lambda d: d if d in frequent_directors else "Unknown Director")
+    for col, d in [("director", "Unknown Director"), ("director_gender", "unknown"),
+                   ("region", "unknown"), ("genres", "Unknown")]:
+        movies[col] = movies[col].fillna(d)
 
     return pos, movies, user2idx, movie2idx, n_users, n_movies
 
@@ -211,13 +215,7 @@ class LightGCNModel(nn.Module):
 
 def get_scores(model, edge_index, train_df, n_users, n_movies,
                candidate_k=50, movie_gender=None, movie_region=None):
-    """
-    Returns candidate (movie_idx, score) pairs per user BEFORE reranking.
 
-    Injects protected group movies into every user's candidate pool so
-    FA*IR always has something to promote. Without this, the pool contains
-    almost no female-directed or non-western movies and reranking has no effect.
-    """
     model.eval()
     with torch.no_grad():
         user_emb, movie_emb = model(edge_index)
@@ -228,8 +226,10 @@ def get_scores(model, edge_index, train_df, n_users, n_movies,
 
     candidates = {}
     SCORE_BATCH = 1000
-    for start in range(0, n_users, SCORE_BATCH):
-        end = min(start + SCORE_BATCH, n_users)
+    # FIX: optionally cap the number of users scored/reranked for speed.
+    eval_n = n_users if EVAL_USERS is None else min(EVAL_USERS, n_users)
+    for start in range(0, eval_n, SCORE_BATCH):
+        end = min(start + SCORE_BATCH, eval_n)
         batch_scores = torch.matmul(user_emb[start:end], movie_emb.T).cpu().numpy()
 
         for i, u in enumerate(range(start, end)):
@@ -243,18 +243,14 @@ def get_scores(model, edge_index, train_df, n_users, n_movies,
             top  = top[np.argsort(s[top])[::-1]]
             pool = set(top.tolist())
 
-            # Inject protected movies so FA*IR has something to promote
-            female_unseen = sorted(
-                [m for m in female_movies if m not in seen_u and m < len(s)],
-                key=lambda m: s[m], reverse=True)
-            for m in female_unseen[:10]:
-                pool.add(m)
-
-            nw_unseen = sorted(
-                [m for m in nonwestern_movies if m not in seen_u and m < len(s)],
-                key=lambda m: s[m], reverse=True)
-            for m in nw_unseen[:10]:
-                pool.add(m)
+            female_scores     = {m: float(s[m]) for m in female_movies if m < len(s)}
+            nonwestern_scores = {m: float(s[m]) for m in nonwestern_movies if m < len(s)}
+            pool.update(diversified_injection(female_scores, seen_u, female_movies,
+                                               n_inject=10, tracker=EXPOSURE_TRACKER,
+                                               sample_from_top=30, seed=u))
+            pool.update(diversified_injection(nonwestern_scores, seen_u, nonwestern_movies,
+                                               n_inject=10, tracker=EXPOSURE_TRACKER,
+                                               sample_from_top=30, seed=u))
 
             pool_list = sorted(pool, key=lambda m: s[m] if s[m] > -1e8 else -1e9, reverse=True)
             candidates[u] = [(int(m), float(s[m])) for m in pool_list]
@@ -262,108 +258,81 @@ def get_scores(model, edge_index, train_df, n_users, n_movies,
     return candidates   # ← single correct return
 
 
-# ─── FA*IR RERANKING ──────────────────────────────────────────────────────────
 
-def fair_rerank(candidates, movie_attr, protected_val, p, k=TOP_K):
-    """
-    Simplified FA*IR-style reranking.
+def _joint_rerank(cands, movie_gender, movie_region, p_g, p_r, k, alpha):
+    
+    # Split by protected status per attribute
+    def bucket(attr, protected_val):
+        prot = sorted([(m, s) for m, s in cands if attr.get(m) == protected_val],
+                      key=lambda x: x[1], reverse=True)
+        unpr = sorted([(m, s) for m, s in cands if attr.get(m) != protected_val],
+                      key=lambda x: x[1], reverse=True)
+        return prot, unpr
 
-    At each position, checks if the proportion of protected items so far
-    is below p. If yes, forces the next best protected item into that slot.
-    Otherwise places the highest-scoring item regardless of group.
+    g_prot, _ = bucket(movie_gender, "female")
+    r_prot, _ = bucket(movie_region, "non-western")
+    all_sorted = sorted(cands, key=lambda x: x[1], reverse=True)
 
-    candidates    : list of (movie_idx, score) sorted by score descending
-    movie_attr    : dict {movie_idx: attribute_value}
-    protected_val : e.g. "female" or "non-western"
-    p             : minimum target proportion for protected group
-    k             : final list size
-    """
-    protected   = [(m, s) for m, s in candidates if movie_attr.get(m) == protected_val]
-    unprotected = [(m, s) for m, s in candidates if movie_attr.get(m) != protected_val]
-
-    result       = []
-    result_flags = []
-    p_ptr        = 0
-    u_ptr        = 0
+    result, flags = [], []
+    used = set()
+    g_placed = 0        # actual female-directed films placed so far
+    r_placed = 0        # actual non-western films placed so far
+    g_i, r_i = 0, 0     # next protected film to consider per axis
+    a_i = 0             # next best-by-score film to consider
 
     for pos in range(k):
-        n_placed    = pos  # items placed so far
-        n_protected = sum(1 for f in result_flags if f == True)
+        need_g = min_protected(pos + 1, p_g, alpha)
+        need_r = min_protected(pos + 1, p_r, alpha)
 
-        # How many protected do we need by this position to meet proportion p?
-        needed = math.ceil(p * (pos + 1))
+        placed = False
+        # Priority: region first if BOTH under-served (it has smaller supply here).
+        if r_placed < need_r:
+            while r_i < len(r_prot) and r_prot[r_i][0] in used:
+                r_i += 1
+            if r_i < len(r_prot):
+                m = r_prot[r_i][0]
+                result.append(m); flags.append("region")
+                used.add(m); r_placed += 1; r_i += 1
+                if movie_gender.get(m) == "female":
+                    g_placed += 1
+                placed = True
 
-        if n_protected < needed and p_ptr < len(protected):
-            # Force a protected item
-            result.append(protected[p_ptr][0])
-            result_flags.append(True)
-            p_ptr += 1
-        else:
-            # Take whichever is higher scoring
-            take_protected = (
-                p_ptr < len(protected) and
-                (u_ptr >= len(unprotected) or
-                 protected[p_ptr][1] >= unprotected[u_ptr][1])
-            )
-            if take_protected:
-                result.append(protected[p_ptr][0])
-                result_flags.append(False)
-                p_ptr += 1
-            elif u_ptr < len(unprotected):
-                result.append(unprotected[u_ptr][0])
-                result_flags.append(False)
-                u_ptr += 1
+        if not placed and g_placed < need_g:
+            while g_i < len(g_prot) and g_prot[g_i][0] in used:
+                g_i += 1
+            if g_i < len(g_prot):
+                m = g_prot[g_i][0]
+                result.append(m); flags.append("gender")
+                used.add(m); g_placed += 1; g_i += 1
+                if movie_region.get(m) == "non-western":
+                    r_placed += 1
+                placed = True
 
-        if len(result) == k:
-            break
+        if not placed:
+            # Fill with best remaining item by score
+            while a_i < len(all_sorted) and all_sorted[a_i][0] in used:
+                a_i += 1
+            if a_i >= len(all_sorted):
+                break
+            m = all_sorted[a_i][0]
+            result.append(m); flags.append("relevance")
+            used.add(m); a_i += 1
+            if movie_gender.get(m) == "female":  g_placed += 1
+            if movie_region.get(m) == "non-western": r_placed += 1
 
-    return result, result_flags
+    return result, flags
 
 
 def rerank_all_users(candidates, movie_gender, movie_region, p_gender, p_region):
-    """
-    Apply FA*IR twice: once for gender, once for region.
-    Gender reranking is applied first, then region reranking on top.
-    Returns recs dict and flags dict.
-    """
-    recs  = {}
-    flags = {}  # (user_idx) -> list of ('gender'|'region'|'relevance') per position
 
+    recs, flags = {}, {}
     for u, cands in candidates.items():
-        # Step 1: gender fairness
-        reranked_gender, gender_flags = fair_rerank(
-            cands, movie_gender, "female", p_gender)
-
-        # Rebuild candidate list in new order for region pass
-        reranked_scores = {m: s for m, s in cands}
-        reranked_cands  = [(m, reranked_scores.get(m, -np.inf)) for m in reranked_gender]
-        # Add any remaining candidates not yet in list
-        seen_set = set(reranked_gender)
-        for m, s in cands:
-            if m not in seen_set:
-                reranked_cands.append((m, s))
-
-        # Step 2: region fairness on top of gender-reranked list
-        reranked_region, region_flags = fair_rerank(
-            reranked_cands, movie_region, "non-western", p_region)
-
-        # Combine flags: label each position
-        combined_flags = []
-        for i, m in enumerate(reranked_region):
-            if i < len(region_flags) and region_flags[i]:
-                combined_flags.append("region")
-            elif i < len(gender_flags) and gender_flags[i]:
-                combined_flags.append("gender")
-            else:
-                combined_flags.append("relevance")
-
-        recs[u]  = reranked_region
-        flags[u] = combined_flags
-
+        rec, fl = _joint_rerank(cands, movie_gender, movie_region,
+                                p_gender, p_region, k=TOP_K, alpha=FAIR_ALPHA)
+        recs[u]  = rec
+        flags[u] = fl
     return recs, flags
 
-
-# ─── EVALUATION ───────────────────────────────────────────────────────────────
 
 def precision_recall_ndcg(recs, ground_truth_df):
     gt = ground_truth_df.groupby("user_idx")["movie_idx"].apply(set).to_dict()
@@ -454,16 +423,23 @@ def generate_user_explanations(user_idx, rec_list, flags, movies_indexed):
 def main():
     # Load data
     pos, movies, user2idx, movie2idx, n_users, n_movies = load_data()
-    train_df, val_df, test_df = split_data(pos)
 
-    # Rebuild KG and model
-    print("Rebuilding KG...")
-    edge_index, n_total = build_kg(train_df, movies, n_users, n_movies)
+    _train_p = os.path.join(KG_OUTPUT_DIR, "train_subset.csv")
+    _test_p  = os.path.join(KG_OUTPUT_DIR, "test_subset.csv")
+    if os.path.exists(_train_p) and os.path.exists(_test_p):
+        train_df = pd.read_csv(_train_p)
+        test_df  = pd.read_csv(_test_p)
+        val_df   = test_df   # not used downstream for the FUT curve
+        print("Loaded train/test subset written by lightgcn_pyg.py")
+    else:
+        train_df, val_df, test_df = split_data(pos)
 
-    model = LightGCNModel(n_total, n_users, n_movies, EMBEDDING_DIM, NUM_LAYERS).to(device)
-    model_path = os.path.join(KG_OUTPUT_DIR, "best_model_kg.pt")
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    print("Loaded KG model weights.")
+    emb_path = os.path.join(KG_OUTPUT_DIR, "user_movie_emb.pt")
+    _emb = torch.load(emb_path, map_location=device)
+    model = EmbeddingHolder(_emb["user_emb"].to(device), _emb["movie_emb"].to(device))
+    edge_index = None  # unused: embeddings are precomputed
+    print(f"Loaded trained embeddings: users={_emb['user_emb'].shape}, "
+          f"movies={_emb['movie_emb'].shape}")
 
     # Movie attribute lookups (must be defined before get_scores)
     movie_gender   = movies.set_index("movie_idx")["director_gender"].to_dict()
@@ -477,7 +453,29 @@ def main():
                             movie_gender=movie_gender,
                             movie_region=movie_region)
 
-    # ── Run FA*IR across multiple p values to generate FUT curve ──
+    print("\nEvaluating no-rerank baseline (same candidates, top-10 by score)...")
+    norerank_recs = {u: [m for m, _ in cands[:TOP_K]] for u, cands in candidates.items()}
+    nb_prec, nb_rec, nb_ndcg = precision_recall_ndcg(norerank_recs, test_df)
+    nb_spd_g, nb_eod_g = compute_fairness_metrics(norerank_recs, test_df, movies,
+                                                  "director_gender", "female", "male")
+    nb_spd_r, nb_eod_r = compute_fairness_metrics(norerank_recs, test_df, movies,
+                                                  "region", "non-western", "western")
+    nb_ext_g = evaluate_extended(norerank_recs, movies, "director_gender", "female",
+                                 n_movies, k=TOP_K)
+    nb_ext_r = evaluate_extended(norerank_recs, movies, "region", "non-western",
+                                 n_movies, k=TOP_K)
+    norerank_metrics = {
+        "ndcg_at_10": nb_ndcg, "precision_at_10": nb_prec, "recall_at_10": nb_rec,
+        "gender_spd": nb_spd_g, "gender_eod": nb_eod_g,
+        "region_spd": nb_spd_r, "region_eod": nb_eod_r,
+        "gender_rND": nb_ext_g.get("rND"), "gender_exposure_gap": nb_ext_g.get("exposure_gap"),
+        "gender_collapse_rate": nb_ext_g.get("collapse_rate"),
+        "region_rND": nb_ext_r.get("rND"), "region_exposure_gap": nb_ext_r.get("exposure_gap"),
+        "region_collapse_rate": nb_ext_r.get("collapse_rate"),
+        "gini_exposure": nb_ext_g.get("gini_exposure"), "catalog_coverage": nb_ext_g.get("catalog_coverage"),
+    }
+    print(f"  no-rerank | NDCG: {nb_ndcg:.4f} | G-SPD: {nb_spd_g:.4f} | R-SPD: {nb_spd_r:.4f}")
+
     print("\nRunning FA*IR reranking across p values...")
     fut_curve = []
 
@@ -490,6 +488,10 @@ def main():
         spd_g, eod_g    = compute_fairness_metrics(recs, test_df, movies, "director_gender", "female", "male")
         spd_r, eod_r    = compute_fairness_metrics(recs, test_df, movies, "region", "non-western", "western")
 
+        # ── Extended metrics: rND, exposure gap, gini, coverage, collapse rate ──
+        ext_gender = evaluate_extended(recs, movies, "director_gender", "female", n_movies, k=TOP_K)
+        ext_region = evaluate_extended(recs, movies, "region", "non-western", n_movies, k=TOP_K)
+
         fut_curve.append({
             "p":             p,
             "ndcg_at_10":    round(ndcg, 4),
@@ -499,60 +501,85 @@ def main():
             "gender_eod":    round(eod_g, 4),
             "region_spd":    round(spd_r, 4),
             "region_eod":    round(eod_r, 4),
+            "gender_rND":            ext_gender["rND"],
+            "gender_exposure_gap":   ext_gender["exposure_gap"],
+            "gender_collapse_rate":  ext_gender["collapse_rate"],
+            "gender_collapse_top":   ext_gender["collapse_top_items"],
+            "region_rND":            ext_region["rND"],
+            "region_exposure_gap":   ext_region["exposure_gap"],
+            "region_collapse_rate":  ext_region["collapse_rate"],
+            "region_collapse_top":   ext_region["collapse_top_items"],
+            "gini_exposure":         ext_gender["gini_exposure"],
+            "catalog_coverage":      ext_gender["catalog_coverage"],
         })
 
-        print(f"p={p:.1f} | NDCG: {ndcg:.4f} | G-SPD: {spd_g:.4f} | R-SPD: {spd_r:.4f}")
+        print(f"p={p:.2f} | NDCG: {ndcg:.4f} | G-SPD: {spd_g:.4f} | R-SPD: {spd_r:.4f} | "
+              f"G-rND: {ext_gender['rND']:.4f} | R-rND: {ext_region['rND']:.4f} | "
+              f"G-Collapse: {ext_gender['collapse_rate']:.4f} | R-Collapse: {ext_region['collapse_rate']:.4f}")
 
     # Save FUT curve
     with open(os.path.join(OUTPUT_DIR, "fut_curve.json"), "w") as f:
         json.dump(fut_curve, f, indent=2)
     print(f"\nFUT curve saved.")
 
-    # ── Use p=0.3 as the primary result ──
-    primary_p = 0.3
-    primary   = next(r for r in fut_curve if r["p"] == primary_p)
+    # ── Primary result: pick a p that ACTUALLY EXISTS in the sweep ──
+    primary_p = FAIR_P_VALUES[len(FAIR_P_VALUES) // 2]
+    primary   = next((r for r in fut_curve if r["p"] == primary_p), fut_curve[0])
+    primary_p = primary["p"]
 
     # ── Full comparison table ──
-    baseline_path = "outputs/baseline/baseline_results.json"
-    kg_path       = "outputs/kg/kg_results.json"
-
-    baseline = json.load(open(baseline_path)) if os.path.exists(baseline_path) else {}
-    kg       = json.load(open(kg_path))       if os.path.exists(kg_path)       else {}
-
     print(f"\n{'='*70}")
-    print(f"FULL COMPARISON TABLE (p={primary_p} for FA*IR)")
+    print(f"COMPARISON: LightGCN vs LightGCN+FA*IR  (same run, p={primary_p})")
     print(f"{'='*70}")
-    print(f"{'Metric':<20} {'Baseline':>10} {'KG':>10} {'KG+FA*IR':>10} {'Δ Fair':>10}")
+    print(f"{'Metric':<24} {'No-Rerank':>12} {'FA*IR':>12} {'Δ Fair':>12}")
     print("-" * 64)
 
     metric_keys = [
-        ("NDCG@10",      "ndcg_at_10"),
-        ("Precision@10", "precision_at_10"),
-        ("Recall@10",    "recall_at_10"),
-        ("Gender SPD",   "gender_spd"),
-        ("Gender EOD",   "gender_eod"),
-        ("Region SPD",   "region_spd"),
-        ("Region EOD",   "region_eod"),
+        ("NDCG@10",              "ndcg_at_10"),
+        ("Precision@10",         "precision_at_10"),
+        ("Recall@10",            "recall_at_10"),
+        ("Gender SPD",           "gender_spd"),
+        ("Gender EOD",           "gender_eod"),
+        ("Region SPD",           "region_spd"),
+        ("Region EOD",           "region_eod"),
+        ("Gender rND",           "gender_rND"),
+        ("Gender Exposure Gap",  "gender_exposure_gap"),
+        ("Gender Collapse Rate", "gender_collapse_rate"),
+        ("Region rND",           "region_rND"),
+        ("Region Exposure Gap",  "region_exposure_gap"),
+        ("Region Collapse Rate", "region_collapse_rate"),
+        ("Gini Exposure",        "gini_exposure"),
+        ("Catalog Coverage",     "catalog_coverage"),
     ]
 
     comparison = {}
     for label, key in metric_keys:
-        b  = baseline.get(key, 0)
-        k  = kg.get(key, 0)
-        f  = primary.get(key, 0)
-        delta = f - k
-        print(f"{label:<20} {b:>10.4f} {k:>10.4f} {f:>10.4f} {delta:>+10.4f}")
-        comparison[label] = {"baseline": b, "kg": k, "kg_fair": f, "delta_fair": delta}
+        nb = norerank_metrics.get(key)
+        fv = primary.get(key)
+        if nb is None or fv is None:
+            continue
+        delta = fv - nb
+        print(f"{label:<24} {nb:>12.4f} {fv:>12.4f} {delta:>+12.4f}")
+        comparison[label] = {"no_rerank": nb, "fair": fv, "delta_fair": delta}
+
+    print("-" * 64)
+    print("Both columns: PyG LightGCN, dense 10k-movie subset, identical")
+    print("candidates and test split. Only difference: FA*IR reranking.")
 
     # Save full comparison
     full_results = {
-        "primary_p":       primary_p,
-        "fair_alpha":      FAIR_ALPHA,
+        "primary_p":        primary_p,
+        "fair_alpha":       FAIR_ALPHA,
+        "rerank_depth":     RERANK_DEPTH,
+        "norerank_metrics": norerank_metrics,
         "comparison_table": comparison,
-        "fut_curve":       fut_curve,
+        "fut_curve":        fut_curve,
     }
     with open(os.path.join(OUTPUT_DIR, "fair_results.json"), "w") as f:
         json.dump(full_results, f, indent=2)
+
+    # (Old Table 2 removed: it compared against stale full-dataset JSONs.
+    # All extended metrics now appear in the unified two-system table above.)
 
     # ── Generate example explanations for 5 users ──
     print(f"\n{'='*70}")
